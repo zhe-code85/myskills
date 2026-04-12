@@ -1,7 +1,7 @@
 interface:
   display_name: "Verilog RTL Workflow"
-  short_description: "Analyze, implement, lint, testbench, and simulate RTL."
-  default_prompt: "Use $verilog-rtl-workflow to analyze the module contract, delegate bounded RTL execution work to a subagent, then write or revise RTL, run lint, add a testbench, and complete behavioral simulation."
+  short_description: "RTL design with timing, CDC, CBB reuse, lint, and simulation."
+  default_prompt: "Use $verilog-rtl-workflow to scan for reusable CBBs, derive the module contract, implement synthesizable timing-aware RTL, review CDC risks, and complete lint, TB, and simulation work."
 
 policy:
   allow_implicit_invocation: true

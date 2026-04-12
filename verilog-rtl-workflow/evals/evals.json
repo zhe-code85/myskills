@@ -1,0 +1,23 @@
+{
+  "skill_name": "verilog-rtl-workflow",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need a priority encoder in plain Verilog. 8-bit input, 3-bit encoded output plus a valid signal. Valid is low when no input bit is active. Lowest index has highest priority. Please go through the full flow: spec, architecture, RTL, lint, testbench, and simulation.",
+      "expected_output": "A complete priority encoder module with self-checking testbench covering reset, single-bit, multi-bit priority, and no-input-active cases. Lint and simulation commands should be shown even if tools are unavailable.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Design a parameterized up/down counter. Default width 8 bits. It should have up/down control, synchronous load, and an overflow indicator that pulses high for one cycle when the counter wraps around. The target clock is 100 MHz and it needs to complete in a single cycle. Use plain Verilog. Go through the full flow.",
+      "expected_output": "A parameterized counter with load, up/down, and overflow detection. Architecture should address timing (single-cycle at 100 MHz). Testbench should cover count up, count down, load, wrap-around overflow, and back-to-back counting.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I need a pulse synchronizer that takes a single-cycle pulse from clk_a domain and produces a single-cycle pulse in clk_b domain. The two clocks are completely asynchronous and the frequency ratio is unknown. Use plain Verilog. Full flow please — spec, architecture, RTL, lint, TB, and sim.",
+      "expected_output": "A toggle-based pulse synchronizer with 2-flop synchronizer chain. Architecture should explicitly address CDC safety (why toggle+2flop is correct, MTBF reasoning). TB should verify pulse transfer and note what CDC risks cannot be proven in RTL simulation alone.",
+      "files": []
+    }
+  ]
+}

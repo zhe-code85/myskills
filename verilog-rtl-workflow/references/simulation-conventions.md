@@ -11,10 +11,15 @@ Preferred order:
 Helper script:
 
 ```bash
-./skills/verilog-rtl-workflow/scripts/verilog_flow.sh lint --top <top_module> --files "rtl/a.v rtl/b.v"
-./skills/verilog-rtl-workflow/scripts/verilog_flow.sh sim --top <top_module> --tb <tb_module> --files "rtl/top.v tb/top_tb.v"
-./skills/verilog-rtl-workflow/scripts/verilog_flow.sh sim --top <top_module> --tb <tb_module> --filelist sim.f --incdir rtl/include --define SIM=1
+# <skill-scripts> is the path to this skill's scripts/ directory.
+# File paths (rtl/*.v, tb/*.v, sim.f) are relative to the project repository,
+# not to the skill directory.
+<skill-scripts>/verilog_flow.sh lint --top <top_module> --files "rtl/a.v rtl/b.v"
+<skill-scripts>/verilog_flow.sh sim --tb <tb_module> --files "rtl/top.v tb/top_tb.v"
+<skill-scripts>/verilog_flow.sh sim --tb <tb_module> --filelist sim.f --incdir rtl/include --define SIM=1
 ```
+
+Filelist format: see [filelist-template.f](./filelist-template.f).
 
 ## Waveforms
 
@@ -31,9 +36,11 @@ When simulation fails:
 3. Re-check RTL against the Stage 2 plan
 4. Re-run lint if RTL changed materially
 5. Re-run simulation
+6. After two or three failed fix attempts on the same issue, stop and report the blocker instead of continuing to guess
 
 ## Common pitfalls
 
 - Same-edge TB drive and DUT sampling races
 - Reading registered outputs before NBA updates become visible
 - Missing `` `timescale `` directives creating noisy timing diagnostics
+- Treating RTL simulation as proof of CDC safety; metastability handling still depends on the chosen crossing primitive

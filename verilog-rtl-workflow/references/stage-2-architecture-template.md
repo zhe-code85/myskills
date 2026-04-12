@@ -4,6 +4,7 @@
 
 - Single module or decomposition:
 - Why:
+- Reused CBBs or wrappers:
 
 ## Datapath
 
@@ -21,12 +22,15 @@
 - Input capture point:
 - Output visibility:
 - Pipeline stages, if any:
+- Likely critical path and mitigation:
 
-## Reset and idle
+## CDC and reset
 
+- CDC strategy for each crossing:
 - Reset behavior:
 - Idle behavior:
 
 ## Consistency check
 
 - Mapping from each Stage 1 requirement to implementation choice:
+- Why the timing and CDC plan is sufficient:

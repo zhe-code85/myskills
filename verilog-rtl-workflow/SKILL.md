@@ -1,176 +1,159 @@
 ---
 name: verilog-rtl-workflow
-description: "Use this skill when the user describes hardware behavior in natural language and needs a strict RTL delivery flow: derive a structured spec, plan the architecture, implement RTL, run lint, write a testbench, and complete behavioral simulation. Trigger it for module-level digital design tasks, interface/protocol decomposition, combinational or sequential RTL coding, TB scaffolding, waveform-driven debug, and regression-style validation with tools such as iverilog, verilator, or vvp. When using this skill, spawn a subagent to execute the bounded implementation and verification work, then integrate the result in the main agent."
+description: "Design or refine synthesizable Verilog/SystemVerilog RTL from natural-language hardware requirements or existing module context. Use for module-level digital design tasks such as timing-aware microarchitecture, clock/reset planning, CDC-safe interfaces, CBB reuse, lint, testbench authoring, simulation, and partial-flow work such as RTL-only, TB-only, debug, or CDC review."
 ---
 
 # Verilog RTL Workflow
 
-Use this skill to drive a reusable RTL delivery workflow for natural-language hardware requests.
+Use this skill to work like a senior digital design engineer: inspect the codebase first, prefer proven building blocks, implement synthesizable RTL, and report timing and CDC risk honestly.
 
-## When to use
+## Default behavior
 
-Use this skill when the user starts from a natural-language hardware requirement and wants a strict delivery flow:
+- Scan the repository for existing interfaces, CBBs, constraints, filelists, and verification utilities before inventing new structures
+- Reuse existing CBBs, CDC primitives, memories, FIFOs, arbiters, wrappers, and adapters before writing new RTL
+- Match the user-specified language exactly; if unspecified, default to plain Verilog and state that assumption
+- Keep RTL synthesizable and maintainable; avoid simulation-only constructs in design code unless they are explicitly gated and documented
+- Treat timing intent, reset behavior, and CDC safety as part of the design contract, not cleanup after simulation
+- Prefer `scripts/verilog_flow.sh` when its lint or simulation modes fit the task; default wave dump path is `build/<tb_module>.vcd`
+- Do not claim timing closure or CDC signoff without tool evidence; if synthesis, STA, or CDC tools are unavailable, give a reasoned engineering assessment and call out residual risk
+- After two or three unsuccessful fix-and-resim iterations on the same issue, stop thrashing and report the blocker, likely root cause, and needed artifact or decision
 
-1. Structured design contract
-2. Architecture plan
-3. RTL
-4. Lint
-5. Testbench
-6. Behavioral simulation
+## Collaboration
 
-Do not skip or reorder stages unless the user explicitly asks to do so.
+- If the environment and collaboration policy allow subagents, prefer one bounded execution subagent for implementation or verification while the main agent owns assumptions, architecture judgment, and the final user-facing conclusion
+- If delegation is unavailable or disallowed, continue locally with the same stage discipline
 
-## Mandatory collaboration pattern
+## Flow selection
 
-Spawn one subagent for bounded execution work whenever this skill is used.
+- Use the full staged flow for a new module or major redesign
+- For RTL-only, TB-only, lint or simulation debug, or CDC or timing review, compress the earlier stages instead of skipping them
 
-Recommended split:
+## Read on demand
 
-- Main agent: inspect the request, confirm assumptions, decide language and scope, and integrate the final result.
-- Subagent: execute the stage flow, write or revise files, run lint or simulation commands, and report structured results back.
-
-Do not delegate the final user-facing conclusion. Keep that in the main agent.
-If the current environment does not expose a subagent tool, state that limitation explicitly and continue locally with the same stage discipline.
-
-## Global rules
-
-- Language choice is mandatory: use the user-specified language exactly; if unspecified, default to plain Verilog and state that assumption explicitly
-- Do not write final RTL before the design contract and architecture plan are internally consistent
-- Do not move to TB authoring while unresolved lint findings still indicate likely RTL correctness issues
-- Default waveform output path is `build/<tb_module>.vcd`
-- Prefer the smallest correct implementation that satisfies the requirement
-- Prefer using `scripts/verilog_flow.sh` when it matches the task instead of rebuilding the same command sequence manually
-
-Read extra references only when needed:
-
-- [analysis checklist](./references/analysis-checklist.md)
-- [architecture plan](./references/architecture-plan.md)
-- [language rules](./references/language-rules.md)
-- [simulation conventions](./references/simulation-conventions.md)
-- [contract template](./references/stage-1-contract-template.md)
-- [architecture template](./references/stage-2-architecture-template.md)
-- [testbench patterns](./references/testbench-patterns.md)
-- [Verilog RTL template](./references/verilog-rtl-template.v)
-- [Verilog TB template](./references/verilog-testbench-template.v)
+- Contract and planning: [analysis checklist](./references/analysis-checklist.md), [contract template](./references/stage-1-contract-template.md), [architecture plan](./references/architecture-plan.md), [architecture template](./references/stage-2-architecture-template.md)
+- Language and templates: [language rules](./references/language-rules.md), [Verilog RTL template](./references/verilog-rtl-template.v), [Verilog TB template](./references/verilog-testbench-template.v), [SystemVerilog RTL template](./references/systemverilog-rtl-template.sv), [SystemVerilog TB template](./references/systemverilog-testbench-template.sv)
+- Timing, CDC, and reuse: [timing and CDC guidance](./references/timing-cdc.md), [CBB reuse guidance](./references/cbb-reuse.md)
+- Verification: [lint triage](./references/lint-triage.md), [simulation conventions](./references/simulation-conventions.md), [testbench patterns](./references/testbench-patterns.md), [filelist template](./references/filelist-template.f)
+- Helper script: `scripts/verilog_flow.sh`
 
 ## Stage flow
 
-### Stage 1. Structured design contract
+### Stage 0. Context and reuse scan
 
-Convert the natural-language request into a structured spec before writing code.
+Inspect the repository before committing to a new microarchitecture. If the repo is effectively empty or the request is a simple standalone combinational block, say so briefly and proceed.
 
 Required output:
 
-- Functional summary
-- Interface summary
-- Selected language
-- Assumptions
-- Corner cases and priority rules
-- Verification targets
+- Reusable modules, wrappers, or CBBs
+- Existing language, reset, naming, filelist, and verification conventions
+- Available constraints, clocks, or target-frequency information
+- Missing information that materially affects correctness, timing, or CDC handling
 
 Exit condition:
 
-- Module boundary, reset behavior, timing intent, corner cases, and language choice are explicit enough to review
-- If critical requirements are missing, the main agent should surface the assumption before the subagent proceeds
+- It is clear whether the work should reuse an existing block, wrap one, or introduce new RTL
+
+### Stage 1. Structured design contract
+
+Convert the request into a reviewable engineering contract before coding.
+
+Required output:
+
+- Functional summary and interface summary, including widths and parameters
+- Clock and reset domains, CDC boundaries, and selected language
+- Timing intent, including frequency, latency, throughput, and backpressure when known
+- Assumptions, corner cases, priority rules, and verification targets
+- Planned CBB reuse versus new logic boundary
+
+Exit condition:
+
+- Module boundary, reset behavior, timing intent, CDC ownership, corner cases, and language choice are explicit enough to review
 
 ### Stage 2. Architecture plan
 
-Produce a compact architecture plan before writing RTL.
+Produce a compact implementation plan before writing RTL.
 
 Required output:
 
-- Block type: combinational or sequential
-- Main datapath and control structure
-- State list when FSMs exist
-- Latency/throughput intent
-- Reset and idle behavior
-- Rationale for tricky choices
+- Block type, main datapath and control structure, and FSM state list when needed
+- Reused CBB instances or wrappers
+- Timing strategy, including likely critical paths and pipeline or register placement
+- CDC strategy for each crossing and reset or idle behavior
+- Rationale for non-obvious choices
 
 Exit condition:
 
-- Every user-visible behavior from Stage 1 is mapped to a concrete implementation strategy
+- Every user-visible behavior from Stage 1 maps to a concrete implementation strategy, including timing-sensitive paths and CDC handling
 
 ### Stage 3. RTL
 
-Implement synthesizable RTL that matches the architecture plan.
+Implement synthesizable RTL that matches the plan.
 
 Required output:
 
 - Final RTL source
 - File naming and syntax aligned with the selected language
+- Reused or wrapped CBBs integrated according to repo conventions
 
 Exit condition:
 
-- RTL is ready for lint and does not rely on exploratory placeholders
+- RTL is synthesizable, free of exploratory placeholders, and structurally consistent with the timing and CDC plan
 
-### Stage 4. Lint
+### Stage 4. Lint and structural review
 
-Run lint before expanding TB effort.
+Run lint before expanding TB effort and triage findings with engineering judgment.
 
 Required output:
 
 - Exact lint command
-- Findings summary
-- Fixes applied, if any
+- Findings summary grouped by severity
+- Fixes applied and any deferred warning with justification
 
 Exit condition:
 
-- No unresolved lint findings that plausibly indicate RTL correctness issues
-- If lint is unavailable, state the missing tool or environment limit explicitly and continue only when the user still wants the reduced validation path
+- No unresolved must-fix findings remain in categories such as syntax or elaboration failure, width or sign mismatch, undriven or multiply-driven logic, accidental latch inference, combinational loops, unsafe clock or reset handling, or CDC-unsafe structure
+
+If lint is unavailable, state the missing tool or environment limit explicitly and continue only if the user still wants the reduced-validation path.
 
 ### Stage 5. Testbench
 
-Write a self-checking TB tied to Stage 1 verification targets.
+Write a self-checking TB tied to the Stage 1 verification targets.
 
 Required output:
 
 - TB source
-- Stable stimulus/checking strategy
+- Stable stimulus and checking strategy
 - Default wave dump to `build/<tb_module>.vcd`
+- CDC-specific or latency-specific checks when needed
 
 Exit condition:
 
-- TB covers reset, nominal path, boundary cases, and defined corner cases
+- TB covers reset, nominal path, boundary cases, defined corner cases, and required back-to-back or handshake behavior
 
-### Stage 6. Simulation
+If the design includes CDC, document what is and is not realistically validated at RTL simulation level.
 
-Run behavioral simulation and debug until the target checks pass.
+### Stage 6. Simulation and engineering summary
+
+Run behavioral simulation and summarize the engineering result.
 
 Required output:
 
-- Exact simulation command
-- Pass/fail result
-- Waveform output path
+- Exact simulation command, pass or fail result, and waveform path
+- Timing assessment
+- CDC assessment
+- Reused CBB summary
 - Remaining risk, if any
 
 Exit condition:
 
 - Targeted scenarios pass, or the remaining blocker is explicitly identified
+- The final report distinguishes verified behavior from inferred timing or CDC confidence
 
-## Deliverable shape
+## Final delivery
 
-Unless the user asks otherwise, final delivery should include:
+Unless the user asks otherwise, include:
 
-- Structured requirement summary
-- Architecture summary
-- RTL
-- TB
-- Lint command and result
-- Simulation command and result
-- Waveform path
-- Assumptions and remaining risk
-
-## Resources
-
-Use these bundled resources directly instead of re-deriving the same structure each time:
-
-- `scripts/verilog_flow.sh`
-- `references/analysis-checklist.md`
-- `references/architecture-plan.md`
-- `references/language-rules.md`
-- `references/simulation-conventions.md`
-- `references/stage-1-contract-template.md`
-- `references/stage-2-architecture-template.md`
-- `references/testbench-patterns.md`
-- `references/verilog-rtl-template.v`
-- `references/verilog-testbench-template.v`
+- Requirement summary and architecture summary
+- RTL and TB
+- Lint command or result and simulation command or result
+- Timing assessment, CDC assessment, reused CBBs or reason for new logic, waveform path, assumptions, and remaining risk

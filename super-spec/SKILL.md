@@ -1,9 +1,9 @@
 ---
-name: super-spec-en-codex
+name: super-spec
 description: Use when a multi-step feature, bugfix, or subsystem needs staged Superpowers delivery plus OpenSpec change tracking. Not for exploration-only, review-only, debug-only, or tiny edits.
 ---
 
-# Super-Spec Codex
+# Super-Spec
 
 Use this skill to keep the split clean:
 - Superpowers drives one delivery point end to end.

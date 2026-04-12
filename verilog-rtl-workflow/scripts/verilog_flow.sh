@@ -5,11 +5,12 @@ usage() {
   cat <<'EOF'
 Usage:
   verilog_flow.sh lint --top <top_module> [--files "a.v b.sv"] [--filelist rtl.f] [--incdir rtl/include] [--define FOO=1]
-  verilog_flow.sh sim --top <top_module> --tb <tb_module> [--files "rtl.v tb.sv"] [--filelist sim.f] [--incdir rtl/include] [--define FOO=1] [--out build/sim.out] [--wave-file build/tb.vcd] [--waves]
+  verilog_flow.sh sim --tb <tb_module> [--files "rtl.v tb.sv"] [--filelist sim.f] [--incdir rtl/include] [--define FOO=1] [--out build/sim.out] [--wave-file build/tb.vcd] [--waves]
 
 Behavior:
   lint: prefer verilator --lint-only, otherwise fallback to iverilog -Wall
-  sim: compile with iverilog and run with vvp, passing a default waveform path under build/
+  sim: compile the testbench with iverilog and run with vvp, passing a default waveform path under build/
+       --top is accepted but ignored in sim mode; only lint uses it.
 EOF
 }
 
@@ -91,8 +92,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "${top}" ]] || die "--top is required"
-
 read -r -a file_array <<< "${files}"
 if [[ -z "${files}" && ${#filelists[@]} -eq 0 ]]; then
   die "provide --files and/or at least one --filelist"
@@ -125,6 +124,8 @@ done
 
 case "${mode}" in
   lint)
+    [[ -n "${top}" ]] || die "--top is required for lint"
+
     if have_cmd verilator; then
       echo "+ verilator --lint-only -Wall --top-module ${top} ${source_desc[*]}"
       exec verilator --lint-only -Wall --top-module "${top}" "${common_args[@]}" "${file_array[@]}"
@@ -139,6 +140,9 @@ case "${mode}" in
     ;;
   sim)
     [[ -n "${tb}" ]] || die "--tb is required for sim"
+    if [[ -n "${top}" ]]; then
+      echo "note: --top is ignored in sim mode; iverilog uses -s <tb> as the top module"
+    fi
     have_cmd iverilog || die "iverilog is required for sim"
     have_cmd vvp || die "vvp is required for sim"
 

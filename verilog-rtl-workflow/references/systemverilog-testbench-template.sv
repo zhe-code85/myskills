@@ -1,15 +1,15 @@
 `timescale 1ns/1ps
 
 module example_tb;
-  localparam WIDTH = 8;
+  localparam int WIDTH = 8;
 
-  reg clk;
-  reg rst_n;
-  reg in_valid;
-  reg [WIDTH-1:0] in_data;
-  wire out_valid;
-  wire [WIDTH-1:0] out_data;
-  reg [8*64-1:0] wave_path;
+  logic clk;
+  logic rst_n;
+  logic in_valid;
+  logic [WIDTH-1:0] in_data;
+  logic out_valid;
+  logic [WIDTH-1:0] out_data;
+  string wave_path;
 
   example_block #(
     .WIDTH(WIDTH)
@@ -34,37 +34,38 @@ module example_tb;
     $dumpvars(0, example_tb);
   end
 
-  task expect_eq;
-    input [WIDTH-1:0] actual;
-    input [WIDTH-1:0] expected;
-    input [8*32-1:0] msg;
-    begin
-      if (actual !== expected) begin
-        $display("TB FAIL %s actual=%0h expected=%0h", msg, actual, expected);
-        $finish(1);
-      end
+  task automatic expect_eq(
+    input logic [WIDTH-1:0] actual,
+    input logic [WIDTH-1:0] expected,
+    input string msg
+  );
+    if (actual !== expected) begin
+      $error("%s actual=%0h expected=%0h", msg, actual, expected);
+      $finish(1);
     end
-  end
+  endtask
 
   initial begin
     rst_n = 1'b0;
     in_valid = 1'b0;
-    in_data = {WIDTH{1'b0}};
+    in_data = '0;
 
     repeat (3) @(posedge clk);
     rst_n = 1'b1;
 
     @(negedge clk);
-    in_valid = 1'b1;
-    in_data = 8'h12;
+    in_valid <= 1'b1;
+    in_data <= 8'h12;
+
     @(posedge clk);
     @(negedge clk);
-    in_valid = 1'b0;
-    in_data = {WIDTH{1'b0}};
+    in_valid <= 1'b0;
+    in_data <= '0;
 
     wait (out_valid === 1'b1);
     expect_eq(out_data, 8'h12, "single transfer");
 
+    repeat (2) @(posedge clk);
     $display("TB PASS");
     $finish;
   end
