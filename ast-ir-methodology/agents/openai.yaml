@@ -1,0 +1,3 @@
+interface:
+  display_name: "AST IR Methodology"
+  short_description: "Learn AST JSONs, design coverage stimulus, and guide reliable extractor implementation"
