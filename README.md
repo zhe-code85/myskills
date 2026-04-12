@@ -1,7 +1,6 @@
 # myskills
 
-个人技能仓库，用于沉淀和迭代可复用的 Codex/Agent 技能。
-Personal skills repository for collecting, refining, and evolving reusable Codex/Agent skills.
+Personal skills repository for collecting, refining, and evolving reusable agent skills.
 
 ## Skills
 
