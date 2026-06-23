@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 
 NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 
 
 def read_xml(package: zipfile.ZipFile, name: str) -> ET.Element | None:
@@ -29,6 +30,33 @@ def text_of(node: ET.Element) -> str:
 
 def attr(node: ET.Element, name: str) -> str | None:
     return node.attrib.get(W + name)
+
+
+def rel_attr(node: ET.Element, name: str) -> str | None:
+    return node.attrib.get(R + name)
+
+
+def local_name(node: ET.Element) -> str:
+    return node.tag.rsplit("}", 1)[-1]
+
+
+def child_attr(node: ET.Element, child_path: str, name: str) -> str | None:
+    child = node.find(child_path, NS)
+    if child is None:
+        return None
+    return attr(child, name)
+
+
+def first_text_sample(text: str, limit: int = 180) -> str:
+    normalized = " ".join(text.split())
+    return normalized[:limit]
+
+
+def part_text(package: zipfile.ZipFile, name: str) -> str:
+    root = read_xml(package, name)
+    if root is None:
+        return ""
+    return text_of(root)
 
 
 def comment_anchor_texts(document: ET.Element | None) -> dict[str, str]:
@@ -78,6 +106,131 @@ def comment_guidance_records(comments: ET.Element | None, document: ET.Element |
     return guidance
 
 
+def section_records(document: ET.Element | None) -> list[dict]:
+    if document is None:
+        return []
+    records = []
+    for index, section in enumerate(document.findall(".//w:sectPr", NS), start=1):
+        pg_size = section.find("./w:pgSz", NS)
+        pg_mar = section.find("./w:pgMar", NS)
+        cols = section.find("./w:cols", NS)
+        records.append(
+            {
+                "index": index,
+                "page_size": {
+                    "w": attr(pg_size, "w") if pg_size is not None else None,
+                    "h": attr(pg_size, "h") if pg_size is not None else None,
+                    "orient": attr(pg_size, "orient") if pg_size is not None else None,
+                },
+                "margins": {
+                    key: attr(pg_mar, key) if pg_mar is not None else None
+                    for key in ("top", "right", "bottom", "left", "header", "footer", "gutter")
+                },
+                "columns": {
+                    "num": attr(cols, "num") if cols is not None else None,
+                    "space": attr(cols, "space") if cols is not None else None,
+                    "equal_width": attr(cols, "equalWidth") if cols is not None else None,
+                },
+                "header_refs": [
+                    {"type": attr(ref, "type"), "r_id": rel_attr(ref, "id")}
+                    for ref in section.findall("./w:headerReference", NS)
+                ],
+                "footer_refs": [
+                    {"type": attr(ref, "type"), "r_id": rel_attr(ref, "id")}
+                    for ref in section.findall("./w:footerReference", NS)
+                ],
+            }
+        )
+    return records
+
+
+def paragraph_style_id(paragraph: ET.Element) -> str | None:
+    p_style = paragraph.find("./w:pPr/w:pStyle", NS)
+    return attr(p_style, "val") if p_style is not None else None
+
+
+def table_record(table: ET.Element, index: int) -> dict:
+    rows = table.findall("./w:tr", NS)
+    grid_cols = [attr(col, "w") for col in table.findall("./w:tblGrid/w:gridCol", NS)]
+    tbl_style = table.find("./w:tblPr/w:tblStyle", NS)
+    header_shading = [
+        attr(shd, "fill")
+        for shd in (rows[0].findall(".//w:tcPr/w:shd", NS) if rows else [])
+        if attr(shd, "fill")
+    ]
+    borders = table.findall("./w:tblPr/w:tblBorders/*", NS)
+    return {
+        "index": index,
+        "row_count": len(rows),
+        "max_cell_count": max((len(row.findall("./w:tc", NS)) for row in rows), default=0),
+        "style_id": attr(tbl_style, "val") if tbl_style is not None else None,
+        "grid_columns": grid_cols,
+        "header_shading": sorted(set(header_shading)),
+        "border_tags": sorted({local_name(border) for border in borders}),
+        "text_sample": first_text_sample(text_of(table)),
+    }
+
+
+def body_block_records(document: ET.Element | None) -> tuple[list[dict], list[dict]]:
+    if document is None:
+        return [], []
+    body = document.find(".//w:body", NS)
+    if body is None:
+        return [], []
+    blocks: list[dict] = []
+    notes: list[dict] = []
+    table_index = 0
+    paragraph_index = 0
+    previous_block: dict | None = None
+    for child in list(body):
+        kind = local_name(child)
+        if kind == "tbl":
+            table_index += 1
+            block = {"kind": "table", "table_index": table_index, "text_sample": first_text_sample(text_of(child))}
+        elif kind == "p":
+            paragraph_index += 1
+            text = text_of(child).strip()
+            block = {
+                "kind": "paragraph",
+                "paragraph_index": paragraph_index,
+                "style_id": paragraph_style_id(child),
+                "text_sample": first_text_sample(text),
+            }
+            if text.lower().startswith(("note", "notes")):
+                notes.append(
+                    {
+                        "paragraph_index": paragraph_index,
+                        "style_id": block["style_id"],
+                        "text": text,
+                        "previous_block": previous_block,
+                    }
+                )
+        else:
+            continue
+        blocks.append(block)
+        previous_block = block
+    return blocks, notes
+
+
+def page_role_candidates(body_text: str) -> list[dict]:
+    rules = [
+        ("front_page", ("DESCRIPTION", "FEATURES", "APPLICATIONS")),
+        ("contents", ("CONTENTS",)),
+        ("order_information", ("ORDER INFORMATION", "DEVICE INFORMATION")),
+        ("pin_configuration", ("PIN CONFIGURATION", "PIN DESCRIPTION")),
+        ("electrical_tables", ("ELECTRICAL CHARACTERISTICS", "ABSOLUTE MAXIMUM", "RECOMMENDED OPERATING")),
+        ("application_figures", ("TYPICAL APPLICATION", "APPLICATION INFORMATION")),
+        ("notice_footer", ("IMPORTANT NOTICE",)),
+    ]
+    upper_text = body_text.upper()
+    candidates = []
+    for role, markers in rules:
+        found = [marker for marker in markers if marker in upper_text]
+        if found:
+            candidates.append({"role": role, "markers": found})
+    return candidates
+
+
 def analyze_docx(path: Path) -> dict:
     with zipfile.ZipFile(path) as package:
         names = package.namelist()
@@ -106,8 +259,7 @@ def analyze_docx(path: Path) -> dict:
         paragraph_styles: dict[str, int] = {}
         note_paragraphs: list[str] = []
         for paragraph in paragraphs:
-            p_style = paragraph.find("./w:pPr/w:pStyle", NS)
-            style_id = attr(p_style, "val") if p_style is not None else None
+            style_id = paragraph_style_id(paragraph)
             if style_id:
                 paragraph_styles[style_id] = paragraph_styles.get(style_id, 0) + 1
             text = text_of(paragraph).strip()
@@ -123,6 +275,45 @@ def analyze_docx(path: Path) -> dict:
 
         comment_guidance = comment_guidance_records(comments, document, path)
         comment_texts = [item["instruction"] for item in comment_guidance]
+        body_blocks, note_records = body_block_records(document)
+        sections = section_records(document)
+        table_records = [table_record(table, index) for index, table in enumerate(tables, start=1)]
+        header_parts = sorted(name for name in names if name.startswith("word/header"))
+        footer_parts = sorted(name for name in names if name.startswith("word/footer"))
+        header_footer_text = {
+            name: first_text_sample(part_text(package, name), 500)
+            for name in header_parts + footer_parts
+        }
+        document_text = text_of(document) if document is not None else ""
+        layout_contract = {
+            "kind": "layout_contract",
+            "source": "structured_docx",
+            "page_setup": {
+                "section_count": len(sections),
+                "two_column_section_count": len(two_cols),
+                "column_break_count": len(column_breaks),
+                "sections": sections,
+            },
+            "header_footer": {
+                "header_parts": header_parts,
+                "footer_parts": footer_parts,
+                "text_by_part": header_footer_text,
+            },
+            "tables": table_records,
+            "notes": note_records,
+            "page_role_candidates": page_role_candidates(document_text),
+            "body_block_sample": body_blocks[:80],
+            "rendering_observations_required": [
+                "page_region_boundaries",
+                "left_right_or_top_bottom_layout",
+                "divider_lines_and_rule_positions",
+                "header_footer_visual_boundaries",
+                "notes_position_relative_to_table_or_figure",
+                "figure_text_relative_position",
+                "watermark_rendering",
+                "font_substitution_or_line_visibility_mismatches",
+            ],
+        }
 
         return {
             "type": "docx",
@@ -132,17 +323,23 @@ def analyze_docx(path: Path) -> dict:
             "drawing_count": len(drawings),
             "column_break_count": len(column_breaks),
             "two_column_section_count": len(two_cols),
+            "section_count": len(sections),
+            "sections": sections,
             "style_ids": sorted(style_ids),
             "style_names": style_names,
             "paragraph_styles": paragraph_styles,
             "numbering_ids": num_ids,
             "note_paragraphs": note_paragraphs,
+            "note_records": note_records,
             "comment_count": len(comment_texts),
             "comments": comment_texts,
             "comment_guidance": comment_guidance,
             "media": sorted(name for name in names if name.startswith("word/media/")),
-            "headers": sorted(name for name in names if name.startswith("word/header")),
-            "footers": sorted(name for name in names if name.startswith("word/footer")),
+            "headers": header_parts,
+            "footers": footer_parts,
+            "header_footer_text": header_footer_text,
+            "table_records": table_records,
+            "layout_contract": layout_contract,
             "has_numbering": numbering is not None,
         }
 
@@ -225,12 +422,14 @@ def main(argv: list[str] | None = None) -> int:
         ],
         "format_fact_checklist": [
             "front_page_sections_headers_footers_watermark",
+            "layout_contract_page_roles_sections_boundaries",
             "heading_style_ids_spacing_case",
             "list_numbering_indents_symbols",
             "contents_toc_tabs_page_numbers_exclusions",
             "notes_after_tables",
             "table_borders_fonts_header_shading",
             "image_positions_captions_source_labels",
+            "rendering_observations_boundaries_divider_lines_notes_positions",
             "template_comments_applicability",
         ],
     }

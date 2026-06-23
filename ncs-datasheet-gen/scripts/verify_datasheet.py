@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import zipfile
 from pathlib import Path
@@ -48,6 +49,42 @@ def body_text_of(document: ET.Element) -> str:
             if text:
                 texts.append(text)
     return "\n".join(texts)
+
+
+def contains_ci(haystack: str, needle: str) -> bool:
+    return needle.casefold() in haystack.casefold()
+
+
+def note_paragraph_count(document: ET.Element) -> int:
+    count = 0
+    for paragraph in document.findall(".//w:p", NS):
+        text = text_of(paragraph).strip()
+        if text.casefold().startswith(("note", "notes")):
+            count += 1
+    return count
+
+
+def load_json(path: Path) -> tuple[object | None, str | None]:
+    if not path.exists():
+        return None, f"missing JSON file: {path}"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), None
+    except Exception as exc:
+        return None, f"unreadable JSON file {path}: {exc}"
+
+
+def json_contains_key(value: object, key: str) -> bool:
+    if isinstance(value, dict):
+        if key in value:
+            return True
+        return any(json_contains_key(child, key) for child in value.values())
+    if isinstance(value, list):
+        return any(json_contains_key(child, key) for child in value)
+    return False
+
+
+def json_contains_any_key(value: object, keys: set[str]) -> bool:
+    return any(json_contains_key(value, key) for key in keys)
 
 
 def body_section_properties(document: ET.Element) -> ET.Element | None:
@@ -125,8 +162,27 @@ def risk_run_counts(document: ET.Element, marker: str) -> tuple[int, int]:
 
 def verify(args: argparse.Namespace) -> list[str]:
     failures: list[str] = []
+    for label, path in (
+        ("source map", args.require_source_map),
+        ("layout contract", args.require_layout_contract),
+        ("output structure plan", args.require_output_structure_plan),
+    ):
+        if path is None:
+            continue
+        data, error = load_json(path)
+        if error:
+            failures.append(error)
+            continue
+        if label == "layout contract" and data is not None and not json_contains_key(data, "layout_contract"):
+            failures.append(f"layout_contract not found in JSON: {path}")
+        if label == "output structure plan" and data is not None and not json_contains_any_key(
+            data, {"output_structure_plan", "output_structure", "structure_plan", "page_role_mapping"}
+        ):
+            failures.append(f"output structure plan or page_role_mapping not found in JSON: {path}")
+
     if not args.docx.exists():
-        return [f"missing DOCX: {args.docx}"]
+        failures.append(f"missing DOCX: {args.docx}")
+        return failures
     with zipfile.ZipFile(args.docx) as package:
         document = read_xml(package, "word/document.xml")
         styles = read_xml(package, "word/styles.xml")
@@ -149,9 +205,21 @@ def verify(args: argparse.Namespace) -> list[str]:
             if forbidden in all_text:
                 failures.append(f"forbidden text found: {forbidden}")
 
+        for forbidden in args.forbid_text_ci or []:
+            if contains_ci(all_text, forbidden):
+                failures.append(f"forbidden text found (case-insensitive): {forbidden}")
+
+        for brand in args.forbid_brand_text or []:
+            if contains_ci(all_text, brand):
+                failures.append(f"forbidden brand/legal text found: {brand}")
+
         for forbidden in args.forbid_header_footer_text or []:
             if forbidden in header_footer_text:
                 failures.append(f"forbidden header/footer text found: {forbidden}")
+
+        for forbidden in args.forbid_header_footer_text_ci or []:
+            if contains_ci(header_footer_text, forbidden):
+                failures.append(f"forbidden header/footer text found (case-insensitive): {forbidden}")
 
         ids = style_ids(styles)
         for required in args.require_style or []:
@@ -160,10 +228,25 @@ def verify(args: argparse.Namespace) -> list[str]:
 
         table_count = len(document.findall(".//w:tbl", NS))
         drawing_count = len(document.findall(".//w:drawing", NS))
+        section_count = len(document.findall(".//w:sectPr", NS))
+        notes_count = note_paragraph_count(document)
+        header_footer_part_count = sum(
+            1
+            for name in package.namelist()
+            if (name.startswith("word/header") or name.startswith("word/footer")) and name.endswith(".xml")
+        )
         if table_count < args.min_tables:
             failures.append(f"expected at least {args.min_tables} tables, found {table_count}")
         if drawing_count < args.min_drawings:
             failures.append(f"expected at least {args.min_drawings} drawings, found {drawing_count}")
+        if section_count < args.min_sections:
+            failures.append(f"expected at least {args.min_sections} sections, found {section_count}")
+        if notes_count < args.min_notes:
+            failures.append(f"expected at least {args.min_notes} Notes/Note paragraphs, found {notes_count}")
+        if header_footer_part_count < args.min_header_footer_parts:
+            failures.append(
+                f"expected at least {args.min_header_footer_parts} header/footer parts, found {header_footer_part_count}"
+            )
 
         if args.require_two_column and not document.findall(".//w:cols[@w:num='2']", NS):
             failures.append("missing two-column section")
@@ -174,6 +257,10 @@ def verify(args: argparse.Namespace) -> list[str]:
         for forbidden in args.forbid_body_text or []:
             if forbidden in body_text:
                 failures.append(f"forbidden body text found: {forbidden}")
+
+        for forbidden in args.forbid_body_text_ci or []:
+            if contains_ci(body_text, forbidden):
+                failures.append(f"forbidden body text found (case-insensitive): {forbidden}")
 
         body_section = body_section_properties(document)
         if args.require_body_two_column and not section_is_two_column(body_section):
@@ -210,14 +297,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--require-style", action="append", help="Required styleId in styles.xml; repeatable")
     parser.add_argument("--min-tables", type=int, default=0)
     parser.add_argument("--min-drawings", type=int, default=0)
+    parser.add_argument("--min-sections", type=int, default=0)
+    parser.add_argument("--min-notes", type=int, default=0)
+    parser.add_argument("--min-header-footer-parts", type=int, default=0)
     parser.add_argument("--require-two-column", action="store_true")
     parser.add_argument("--require-column-break", action="store_true")
     parser.add_argument("--forbid-comments", action="store_true", help="Fail if inherited Word comments or comment references remain")
     parser.add_argument("--forbid-text", action="append", help="Text that must not appear in body, headers, or footers; repeatable")
+    parser.add_argument("--forbid-text-ci", action="append", help="Case-insensitive forbidden text in body, headers, or footers")
+    parser.add_argument("--forbid-brand-text", action="append", help="Case-insensitive forbidden brand/legal text anywhere")
     parser.add_argument("--forbid-header-footer-text", action="append", help="Text that must not appear in headers or footers; repeatable")
+    parser.add_argument("--forbid-header-footer-text-ci", action="append", help="Case-insensitive forbidden text in headers or footers")
     parser.add_argument("--forbid-body-text", action="append", help="Text that must not appear in the generated document body; repeatable")
+    parser.add_argument("--forbid-body-text-ci", action="append", help="Case-insensitive forbidden text in the generated document body")
     parser.add_argument("--require-body-two-column", action="store_true", help="Require the body-level section properties to be two-column")
     parser.add_argument("--min-body-section-header-footer-refs", type=int, default=0, help="Minimum body-level header/footer references")
+    parser.add_argument("--require-source-map", type=Path, help="Require a readable source_map/audit JSON file")
+    parser.add_argument("--require-layout-contract", type=Path, help="Require JSON containing a layout_contract key")
+    parser.add_argument(
+        "--require-output-structure-plan",
+        type=Path,
+        help="Require JSON containing output_structure_plan, output_structure, structure_plan, or page_role_mapping",
+    )
     return parser
 
 

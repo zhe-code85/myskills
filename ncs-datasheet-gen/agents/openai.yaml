@@ -1,4 +1,4 @@
 interface:
   display_name: "NCS Datasheet Gen"
-  short_description: "Build evidence-gated NCS/company chip datasheets from a template, competitor reference, and optional prior company doc"
-  default_prompt: "Use $ncs-datasheet-gen to identify my template, competitor/reference datasheet, and optional prior company datasheet, confirm the target gate, then build evidence and risk maps before creating any DOCX."
+  short_description: "Build evidence-gated NCS/company chip datasheets from explicitly provided DOCX/PDF sources"
+  default_prompt: "Use $ncs-datasheet-gen with these explicitly provided files: style_template=<path>, reference_datasheet=<path>, company_prior_datasheet=<optional path>. Confirm the gates, build source_map.json, then create and verify the DOCX when gates pass."

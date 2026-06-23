@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -18,6 +19,48 @@ def import_fitz():
 
 def page_pngs(render_dir: Path) -> list[Path]:
     return sorted(render_dir.glob("page-*.png"))
+
+
+def safe_label(value: str) -> str:
+    label = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
+    return label.strip("-") or "page-role"
+
+
+def parse_pair(raw: str) -> dict:
+    if "=" not in raw or ":" not in raw:
+        raise argparse.ArgumentTypeError("expected ROLE=TEMPLATE_PAGE:DRAFT_PAGE")
+    role, pages = raw.split("=", 1)
+    template_page, draft_page = pages.split(":", 1)
+    try:
+        template_number = int(template_page)
+        draft_number = int(draft_page)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("page numbers must be integers") from exc
+    if template_number < 1 or draft_number < 1:
+        raise argparse.ArgumentTypeError("page numbers are 1-based and must be positive")
+    role = role.strip()
+    if not role:
+        raise argparse.ArgumentTypeError("role must not be empty")
+    return {"role": role, "template_page": template_number, "draft_page": draft_number}
+
+
+def load_pairs(path: Path) -> list[dict]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        data = data.get("pairs") or data.get("page_role_mapping") or data.get("pages")
+    if not isinstance(data, list):
+        raise ValueError("pairs JSON must be a list or contain pairs/page_role_mapping/pages list")
+    pairs = []
+    for index, item in enumerate(data, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"pair {index} must be an object")
+        role = str(item.get("role") or item.get("layout_role") or f"role-{index}")
+        template_page = int(item.get("template_page") or item.get("template") or item.get("left_page"))
+        draft_page = int(item.get("draft_page") or item.get("draft") or item.get("right_page"))
+        if template_page < 1 or draft_page < 1:
+            raise ValueError(f"pair {index} uses invalid 1-based page numbers")
+        pairs.append({"role": role, "template_page": template_page, "draft_page": draft_page})
+    return pairs
 
 
 def pixmap_for(path: Path):
@@ -62,28 +105,46 @@ def write_side_by_side(template_png: Path, draft_png: Path, output_png: Path, *,
     document.close()
 
 
-def compare(template_render_dir: Path, draft_render_dir: Path, out_dir: Path) -> dict:
+def compare(template_render_dir: Path, draft_render_dir: Path, out_dir: Path, pairs: list[dict] | None = None) -> dict:
     template_pages = page_pngs(template_render_dir)
     draft_pages = page_pngs(draft_render_dir)
-    compared = min(len(template_pages), len(draft_pages))
+    if pairs is None:
+        compared = min(len(template_pages), len(draft_pages))
+        pairs = [
+            {"role": f"page-{index + 1:03d}", "template_page": index + 1, "draft_page": index + 1}
+            for index in range(compared)
+        ]
+        comparison_mode = "page_index"
+    else:
+        comparison_mode = "page_role"
+        compared = len(pairs)
     out_dir.mkdir(parents=True, exist_ok=True)
     pages = []
-    for index in range(compared):
-        template_png = template_pages[index]
-        draft_png = draft_pages[index]
-        side_by_side = out_dir / f"page-{index + 1:03d}-side-by-side.png"
+    for index, pair in enumerate(pairs, start=1):
+        template_page_number = pair["template_page"]
+        draft_page_number = pair["draft_page"]
+        if template_page_number > len(template_pages):
+            raise ValueError(f"template page {template_page_number} for role {pair['role']} is not rendered")
+        if draft_page_number > len(draft_pages):
+            raise ValueError(f"draft page {draft_page_number} for role {pair['role']} is not rendered")
+        template_png = template_pages[template_page_number - 1]
+        draft_png = draft_pages[draft_page_number - 1]
+        role_label = safe_label(str(pair["role"]))
+        side_by_side = out_dir / f"{index:03d}-{role_label}-template-{template_page_number:03d}-draft-{draft_page_number:03d}-side-by-side.png"
         template_pix = pixmap_for(template_png)
         draft_pix = pixmap_for(draft_png)
         write_side_by_side(
             template_png,
             draft_png,
             side_by_side,
-            label_left=f"template {template_png.name}",
-            label_right=f"draft {draft_png.name}",
+            label_left=f"template {pair['role']} {template_png.name}",
+            label_right=f"draft {pair['role']} {draft_png.name}",
         )
         pages.append(
             {
-                "page": index + 1,
+                "role": pair["role"],
+                "template_page": template_page_number,
+                "draft_page": draft_page_number,
                 "template_png": str(template_png.resolve()),
                 "draft_png": str(draft_png.resolve()),
                 "side_by_side_png": str(side_by_side.resolve()),
@@ -95,6 +156,7 @@ def compare(template_render_dir: Path, draft_render_dir: Path, out_dir: Path) ->
     result = {
         "template_render_dir": str(template_render_dir.resolve()),
         "draft_render_dir": str(draft_render_dir.resolve()),
+        "comparison_mode": comparison_mode,
         "page_count_template": len(template_pages),
         "page_count_draft": len(draft_pages),
         "page_count_compared": compared,
@@ -104,13 +166,18 @@ def compare(template_render_dir: Path, draft_render_dir: Path, out_dir: Path) ->
     lines = [
         "# Visual Comparison",
         "",
+        f"- Comparison mode: {comparison_mode}",
         f"- Template pages: {len(template_pages)}",
         f"- Draft pages: {len(draft_pages)}",
         f"- Compared pages: {compared}",
         "",
     ]
     for page in pages:
-        lines.append(f"- Page {page['page']}: mean_abs_diff={page['mean_abs_diff']}, side_by_side={Path(page['side_by_side_png']).name}")
+        lines.append(
+            "- "
+            f"{page['role']}: template_page={page['template_page']}, draft_page={page['draft_page']}, "
+            f"mean_abs_diff={page['mean_abs_diff']}, side_by_side={Path(page['side_by_side_png']).name}"
+        )
     (out_dir / "visual_comparison.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return result
 
@@ -120,17 +187,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--template-render-dir", type=Path, required=True)
     parser.add_argument("--draft-render-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument(
+        "--pair",
+        action="append",
+        type=parse_pair,
+        help="Role-based page pair as ROLE=TEMPLATE_PAGE:DRAFT_PAGE; repeatable",
+    )
+    parser.add_argument("--pairs-json", type=Path, help="JSON list of role/template_page/draft_page objects")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = compare(args.template_render_dir, args.draft_render_dir, args.out_dir)
+        pairs = []
+        if args.pairs_json:
+            pairs.extend(load_pairs(args.pairs_json))
+        if args.pair:
+            pairs.extend(args.pair)
+        result = compare(args.template_render_dir, args.draft_render_dir, args.out_dir, pairs or None)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-    print(f"Compared pages: {result['page_count_compared']}")
+    print(f"Compared pages: {result['page_count_compared']} ({result['comparison_mode']})")
     print(f"Summary: {args.out_dir / 'visual_comparison.json'}")
     return 0
 
