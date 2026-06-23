@@ -1,19 +1,29 @@
 ---
 name: ncs-datasheet-gen
-description: Use when creating, revising, formatting, validating, or maintaining an NCS/company semiconductor datasheet from DOCX/PDF source documents, especially when the template, reference, prior company document, or product facts may have different structures or styles.
+description: Use when creating, revising, formatting, validating, or maintaining an NCS/company semiconductor datasheet from a style template, competitor/reference datasheet, and optional prior company datasheet.
 ---
 
 # NCS Datasheet Gen
 
 ## Overview
 
-你要把不同结构的 DOCX/PDF 输入文档归一化成可追溯原材料，再由你编排 `content.json`，最后用确定性 DOCX renderer 生成并验证 datasheet。脚本负责渲染、清模板正文、输出中移除批注载体和结构校验；你负责判断文档角色、抽取事实、组织章节、处置模板批注规则和标记风险。
+你是辅助编写 semiconductor/chip datasheet 的智能体。你要以芯片产品和 datasheet 专业写作视角处理任务：先识别输入文档角色和目标产品边界，再把来源事实、版式证据、模板规则和风险项转化为可审计的 datasheet 内容与 DOCX 版式。内容创作必须服务于芯片 datasheet 的专业目的，例如器件定位、功能描述、pin/package、electrical characteristics、absolute maximum ratings、recommended operating conditions、thermal/ESD、application、package/tape reel、revision/notice 等，而不是为了填满模板版面或模仿参考稿文字。
 
-**开始时说明：**“我会使用 ncs-datasheet-gen 流程，先按角色梳理输入文档，再生成可追溯的 `content.json` 和 DOCX 草稿。”
+**开始时说明：**“我会使用 ncs-datasheet-gen 流程，先识别输入角色和证据来源；目标产品、品牌和交付边界确认后，再按模板视觉与产品事实设计 DOCX 草稿并做渲染校验。”
+
+本 skill 不提供交付用固定 renderer。你要复制或改造模板作为版式容器，用 Python/OOXML/Word COM 或任务内临时脚本创作 DOCX，从 PDF/DOCX 裁剪或抽取真实图形，并用渲染图迭代。脚本只用于分析、渲染、抽取和校验，不负责最终 datasheet 生成。
+
+输入门禁先于目标门禁：用户必须逐项提供明确的输入文件路径或附件。泛化生成请求、目录型请求、工作区上下文、项目名、历史输出位置、资产库或自主查找请求都不算输入门禁通过。若请求没有给出明确文件路径或附件，立即向用户索要 `style_template`、`reference_datasheet`、可选 `company_prior_datasheet` 和目标产品信息；不要扫描目录、不要枚举现有资产、不要凭当前工作区猜输入、不要运行脚本、不要创建 `source_map.json`、`result.md` 或任何 DOCX。
+
+目标门禁是硬边界：目标芯片型号、输出品牌/法务主体、交付语言和版本策略必须来自用户明确文字，不能从竞品、模板或可选我司既往产品推断。输入门禁已通过但目标门禁不通过时，只建立角色判断、证据包、风险/澄清清单和 `result.md`；不要创建 DOCX、不要写交付生成脚本、不要把“先假设并标风险”当作绕过方式。风险标注只用于已确认目标下的局部事实缺口。
+
+写入任何规则前先做抽象化检查：这条规则是否对未来同类 datasheet 仍成立，是否直接告诉你何时做什么、如何判断完成，是否包含某次用户请求、某个具体文件、某个目标型号或某句样例文字。不能通过检查的内容只放进本次 `source_map.json`、测试记录或临时生成脚本，不写入 skill。
+
+内容驱动创作是总原则：所有由你创作、改写、重排或保留的内容，都必须由当前文档内容、来源证据、目标产品事实、模板批注、版式目的和芯片 datasheet 专业判断共同驱动。每个标题、段落、bullet、表格行、Notes、caption、风险句、声明、目录条目或图形，都要能说明它解决了哪个 datasheet 专业问题：描述器件功能、约束使用条件、解释电气/热/封装参数、标注 pin/function、提示应用/测试条件、保留必要法务信息，或暴露待确认风险。模板只能提供形式和位置，不能替你生成正文含义；竞品和既往产品只能提供带边界的事实和结构。若某个元素没有明确内容依据、专业用途和适用边界，就不要生成；改为在 `source_map.json` 标为缺失、不适用或需要澄清。
 
 ## Script Environment
 
-使用 Python 3.10+ 运行 `scripts/` 中的工具。开始处理文档前执行：
+使用 Python 3.10+ 运行 `scripts/` 中的辅助工具。开始处理文档前执行：
 
 ```bash
 python scripts/render_document.py --probe
@@ -22,82 +32,92 @@ python scripts/render_document.py --install-help
 
 首次使用任一脚本前运行该脚本的 `--help`，确认命令入口可用。
 
-- `analyze_sources.py`、`extract_assets.py`、`verify_datasheet.py` 的 DOCX 基础解析使用 Python 标准库。
-- `scripts/requirements.txt` 提供 `PyMuPDF`、`python-docx` 和 Windows Word COM 所需的 `pywin32`。
-- `render_document.py` 渲染 DOCX 还需要 Microsoft Word COM 或 LibreOffice 的 `soffice`。
-- 如果 Word/LibreOffice 不可用，`render_document.py --engine docx-preview` 可生成结构化版式预览图；它不是 Word 等价渲染，只能用于模板视觉结构、页数、栏数、图表密度和粗粒度差距诊断。
-- 依赖、Word COM 或 LibreOffice 缺失且无法安装时，记录缺失项、命令和错误输出；只汇报已完成的验证项。
+- `analyze_sources.py` 用于初步解析 DOCX/PDF 的文本、样式、批注、表格、图片和版式线索。
+- `render_document.py` 用于把 DOCX/PDF 渲染成 PNG，作为视觉判断依据。
+- `compare_renders.py` 用于生成 side-by-side 对比图和粗略图像差异数据。
+- `extract_assets.py` 用于从 DOCX 中抽取媒体资源；从 PDF 裁图时可写一次性临时脚本。
+- `verify_datasheet.py` 用于检查关键文本、风险标记、批注残留、表格/图片数量、页眉页脚和 section 信号。
+
+DOCX 真实渲染优先使用 Microsoft Word COM；没有 Word 时可用 LibreOffice。两者都不可用时，`docx-preview` 只能做粗粒度预览，不能声称通过 Word 等价版式验证。
 
 ## The Process
 
-### Step 1: 按角色澄清输入
+### Step 1: 识别输入角色
 
-按角色而不是文件名理解输入文档。同一文件可以承担多个角色，某个角色也可以缺失，但缺失会改变风险标注和输出边界。
+先执行输入门禁：
+
+- 用户没有给出具体文件路径或附件时，停止并向用户索要输入；不要枚举当前工作区，也不要生成审计文件。
+- 用户只给出目录、工作区、项目名、历史输出位置、资产库或自主查找要求时，仍视为输入门禁未通过；要求用户逐项指定要使用的 DOCX/PDF/图片文件。
+- 只处理用户逐项指定的输入文件；即使目录里存在看似相关的模板、logo、历史生成稿、参考结果或缓存图片，也不能自行纳入。
+- 对用户明确指定的输入文件，忽略隐藏的 Word 临时锁文件（如 `~$*.docx`）。
+- 可进入分析的最小输入集通常包含 `style_template` 和 `reference_datasheet`；`company_prior_datasheet` 可缺失。若缺少模板或竞品/参考来源，先问用户补充或确认降级边界，不要直接创建交付稿。
+- 只有输入门禁通过后，才按角色理解输入、运行脚本或写入任何本轮产物。
+
+按角色理解输入，而不是按文件名机械处理。同一文件可以承担多个角色，某个角色也可以缺失，但缺失会改变风险标注和输出边界。
 
 | 角色 | 常见格式 | 用途 | 约束 |
 | --- | --- | --- | --- |
-| `style_template` | DOCX 优先，PDF 只能作视觉参考 | 样式、页眉页脚、section、栏数、目录、表格、图片版式、模板批注/注释规则 | 只复用格式，不保留占位正文；批注内容要先转成规则再从输出移除 |
-| `reference_datasheet` | PDF/DOCX | 竞品或公开参考的章节框架、对标项、待补充项 | 不把参考参数写成我司承诺 |
-| `company_prior_datasheet` | DOCX/PDF | 我司既有术语、写法、可复用确认事实、可复用图片 | 不替代目标产品事实 |
-| `target_product_facts` | DOCX/PDF 或用户提供事实包 | 目标产品型号、封装、pin、规格、限制、版本信息 | 最高优先级；缺失时必须标风险 |
+| `style_template` | DOCX 优先，PDF 只能作视觉参考 | 样式、页眉页脚、section、栏数、目录、表格、图片版式、模板批注/注释规则 | 必需；只复用格式，不保留占位正文；批注内容要先转成规则再从输出移除 |
+| `reference_datasheet` | PDF/DOCX | 竞品或公开参考的章节框架、pinout、图形、对标项、弱项发现 | 必需；不把参考参数写成我司已确认承诺 |
+| `company_prior_datasheet` | DOCX/PDF | 我司既有术语、写法、同族产品边界、可借鉴事实和可复用图片 | 可选；不替代目标产品事实，跨产品复用必须标适用边界 |
 
-确认目标芯片型号、功能定位、封装、版本号、日期、输出路径、语言、pin-to-pin 兼容对象、风险标注格式和是否允许先出带风险的草稿。
+确认目标芯片型号、功能定位、版本号、日期、输出路径、语言、pin-to-pin 兼容对象、品牌/法务主体和风险标注格式。目标产品的具体参数通常不会作为独立输入文件出现；除用户明确提供的信息外，来自竞品或我司既往产品的目标项都必须带来源边界和确认风险。
 
-如果只有 PDF 作为 `style_template`，说明无法直接继承 Word 样式、页眉页脚和 section；只能用它做视觉参考，或要求用户提供 DOCX 模板。
+执行目标门禁：
 
-### Step 2: 分析输入文档
+- 用户明确指定目标芯片、输出品牌/法务主体、交付语言和版本策略时，继续建立证据包。
+- 用户只提供 `style_template`、`reference_datasheet` 和可选 `company_prior_datasheet`，但没有明确说明目标产品时，只能输出角色判断、证据包和澄清清单。即使可选我司既往产品是唯一公司产品，也不能把它自动当成目标。
+- 目标型号、品牌/法务主体、交付语言或版本策略缺失时，不要创建 DOCX、不要创建交付生成脚本、不要渲染所谓生成稿。
+- 不要用“先假设、再用风险标记”的方式绕过目标门禁；风险标记只适用于目标已确认后的局部参数、图形、兼容性或竞品来源事实。
+
+无法判断模板或竞品角色时先问用户；隐藏的 Word 临时锁文件（如 `~$*.docx`）不要作为输入。
+
+### Step 2: 建立证据包
 
 运行角色化来源分析：
 
 ```bash
 python scripts/analyze_sources.py \
-  --source style_template=<style-template-or-visual-reference.docx> \
+  --source style_template=<style-template.docx> \
   --source reference_datasheet=<reference-datasheet.pdf> \
   --source company_prior_datasheet=<prior-company-datasheet.docx> \
-  --source target_product_facts=<target-product-facts.docx> \
   --out <analysis.json>
 ```
 
-只传实际存在的角色；缺失角色不要伪造路径。运行模板或参考文档渲染：
+只传实际存在的角色；`style_template` 和 `reference_datasheet` 是正常必需输入，`company_prior_datasheet` 缺失时不要伪造路径。
+
+渲染模板、竞品/参考和我司既往产品的关键页；只有目标门禁通过并已产生生成稿时，才渲染生成稿：
 
 ```bash
 python scripts/render_document.py <input.docx|pdf> --out-dir <render-dir> --pages 1,2-4
 ```
 
-必须产出 `style_template`、关键参考文档和生成稿的渲染图后再判断版式。DOCX 真实渲染失败时，不得声称已参考模板排版；把该验证项记录为 `failed` 或 `not run`，并说明 LibreOffice/Word COM 错误。为了继续做粗粒度视觉诊断，可以显式运行：
+必须在看到渲染图后再判断版式。建立证据包时至少记录：
 
-```bash
-python scripts/render_document.py <input.docx> --engine docx-preview --out-dir <preview-render-dir> --pages 1,2-4
-```
+- 首页结构：logo/title 位置、红色提示线、水印、分栏、description/features/applications 区块、页脚和页码。
+- 目录规则：位置、是否在 typical application 后、字体大小、tab leader、条目和页码。
+- 标题体系：styleId、大小写、字号、段前段后、分页规则。
+- 表格格式：外框线、内框线、表头底色、字体字号、列宽、合并单元格、标题行规则、表后 `Notes:` 原文/用途/适用性和位置；Notes 是表格解释的一部分，不要因为正文已有风险标记就省略。
+- 图片格式：来源、裁剪范围、尺寸、caption 样式、图号规则、风险说明。
+- 模板批注/注释：抽取为规则，逐条处置为 `applied`、`not_applicable` 或 `needs_clarification`。
+- 法务/商标样板文字：模板中的商标、版权、专利、复印限制、保密说明等 boilerplate 先归类为 `template_guidance` 或页眉页脚/notice/声明区规则；除非用户明确要求且品牌主体适用，不要混入 description、features、applications 等技术正文。
+- 事实来源：用户明确事实、我司同族事实、竞品事实和缺失事实必须分开。
+- 创作对象依据：为预计进入正文的标题、段落、bullet、表格行、Notes、caption、风险句、声明和图形记录来源、用途和适用边界；没有依据的对象不要进入生成稿。
 
-`docx-preview` 结果必须在报告中标注“不是 Word 等价渲染”。它只能支持 gross layout comparison，不能替代最终 Word/LibreOffice 渲染通过。
+不要根据当前某个样例推断所有模板都有同样章节顺序、页眉页脚结构或图表密度。用 OOXML、渲染图和来源文本交叉确认。
 
-建立格式事实清单，至少覆盖：
+### Step 3: 输出 source_map.json
 
-- 首页结构：分栏、section break、column break、页眉、页脚、水印、logo 区域、首页页码
-- 标题体系：各级 styleId、显示大小写、字号、字体、段前段后、分页规则
-- 列表体系：一级和二级 numId、缩进、制表位、符号；不允许用默认项目符号代替已识别的模板编号体系
-- 目录规则：CONTENTS 位置、TOC 样式、tab leader、页码格式、哪些章节进入或不进入目录
-- Notes/Note：表格后注释段的位置、原文、用途、适用性、替代处理
-- 表格格式：外框线、内框线、表头底色、字体字号、列宽、合并单元格、标题行规则
-- 图片格式：位置、尺寸、caption 样式、图号规则、来源标注、占位图写法
-- 模板批注/注释：先抽取为 `comment_guidance`，再转入 `source_map.json` 的 `template_guidance`；逐条处置为 `applied`、`not_applicable` 或 `needs_clarification`，写明证据；不得直接丢弃，也不允许把 Word 批注载体保留到新文档
-- 模板视觉布局：从模板渲染图或 `docx-preview` 图提取首页区域、两栏/单栏、目录位置、图表节奏、表格连续性、页眉页脚占位、正文密度和每页主要模块，写入 `source_map.json` 的 `format_fact` 或 `section_pattern`
+只有输入门禁通过后，才输出 `source_map.json` 或等价审计记录。目标门禁通过后，再创作交付 DOCX；目标门禁未通过但输入门禁已通过时，`source_map.json` 是本轮主要产物，并必须记录缺失的目标信息和澄清问题。若输入门禁未通过，不要创建 `source_map.json`、`result.md` 或占位产物，直接向用户索要输入。`source_map.json` 必须能解释正文每个关键事实、风险项、图片和版式决定从哪里来。
 
-对不确定格式使用 OOXML、PDF 渲染图、截图或解析脚本确认。不要根据当前某个样例推断所有模板都有同样的章节顺序、样式名、表格列或页眉页脚结构。
-
-### Step 3: 生成 source_map.json
-
-先输出 `source_map.json`，再写 `content.json`。`source_map.json` 是你对原材料的归一化结果，不要求 renderer 直接消费，但必须可审计。
-
-每条事实建议包含：
+每条记录建议包含：
 
 ```json
 {
   "id": "<stable fact id>",
   "kind": "<product_fact|format_fact|template_guidance|section_pattern|table_fact|figure_asset|risk>",
   "normalized_fact": "<normalized claim, layout rule, or missing item>",
-  "source_role": "<style_template|reference_datasheet|company_prior_datasheet|target_product_facts|user>",
+  "source_role": "<style_template|reference_datasheet|company_prior_datasheet|user>",
   "source_ref": "<file name + page/section/table/paragraph reference>",
   "confidence": "<confirmed|needs_confirmation|reference_only|conflict>",
   "risk": "<missing|weaker|competitor_source|none>",
@@ -107,117 +127,65 @@ python scripts/render_document.py <input.docx> --engine docx-preview --out-dir <
 
 事实优先级：
 
-1. 用户明确事实和 `target_product_facts` 用于目标产品承诺。
-2. `style_template` 的批注/注释是格式和生成规则来源；先转成 `template_guidance` 并逐条处置，不能因为最终 DOCX 不保留批注就忽略其内容。
-3. `company_prior_datasheet` 用于公司术语、写法、资产和可确认的同族产品事实；跨产品复用时要标注适用边界。
-4. `reference_datasheet` 用于章节框架、对标项、风险发现和临时占位；引用到正文时必须标 `competitor_source` 或等效风险。
-5. 任何来源冲突、目标事实缺失、弱于参考、图片来源不明或 pin/package 不确定，都进入风险表。
+1. 用户明确事实是目标产品承诺来源。
+2. `style_template` 的批注/注释是格式和生成规则来源；必须转成 `template_guidance`。
+3. `company_prior_datasheet` 用于公司术语、写法、资产和可确认的同族产品事实；跨产品复用要标边界。
+4. `reference_datasheet` 用于章节框架、pin-to-pin 对照、竞品图形、待补项和风险发现；进入正文时必须标 `competitor_source` 或等效风险。
 
-### Step 4: 编排 content.json
+### Step 4: 设计 datasheet 草稿
 
-你根据 `source_map.json` 编排 `content.json`。章节不固定，按目标产品、参考结构和模板目录规则决定；不要把 `DESCRIPTION`、pin 表或 revision history 当成所有文档必有的硬编码结构。
+只有目标门禁通过时才进入本步骤。
 
-编排时要按模板视觉事实先做版式规划，再写正文：
+你负责创作设计，不要把交付质量交给固定脚本决定。先用渲染证据决定页面节奏，再写内容和实现方案。
 
-1. 用模板渲染图确定首页模块和栏目分布，例如 description/features/applications、contents、typical application、order/device information 等区域。
-2. 用参考/既往产品文档确定目标产品应覆盖的章节、表格和图；不能因为 renderer 能输出段落就省略 block diagram、pin diagram、electrical characteristics、package 等常见 datasheet 模块。
-3. 把 `content.json.sections` 排成接近模板视觉节奏的顺序：短说明和 features 先行，pin/ratings/electrical tables 成组，图形用真实资产或带风险的 `image_placeholder` 占位。
-4. 不把来源控制、模板指导处置、格式验证说明放进交付正文；这些内容保存在 `source_map.json` 或单独审计稿。
+设计每个可见元素前先过内容依据检查：
 
-最小结构：
+1. 这个元素解释或承载了哪个目标事实、来源事实、版式规则、风险项、用户要求或 datasheet 专业必要信息？
+2. 它来自哪个 source role 和 source ref，或由哪些来源综合得出？
+3. 它为什么应该出现在这个章节和这个位置；它是否符合该章节在芯片 datasheet 中的专业用途？
+4. 它是否误把模板话术、竞品事实、既往产品事实或参考稿缺陷当成目标产品事实？
 
-```json
-{
-  "product": {
-    "name": "<target_part_number>",
-    "subtitle": "<datasheet subtitle>",
-    "revision": "<revision or TBD>",
-    "date": "<YYYY/MM/DD or TBD>",
-    "compatibility": "<pin-to-pin compatibility statement or TBD>"
-  },
-  "sources": {
-    "input_documents": [
-      {"role": "style_template", "path": "<path>", "purpose": "format/style/layout only"},
-      {"role": "reference_datasheet", "path": "<path>", "purpose": "framework and comparison"},
-      {"role": "company_prior_datasheet", "path": "<path>", "purpose": "company wording and reusable assets"},
-      {"role": "target_product_facts", "path": "<path>", "purpose": "authoritative target facts"}
-    ],
-    "analysis_report": "<analysis.json>",
-    "source_map": "<source_map.json>",
-    "asset_manifest": "<assets.json>"
-  },
-  "template_guidance": [
-    {
-      "source_role": "style_template",
-      "source_ref": "<template comment id or source_map id>",
-      "instruction": "<template comment or annotation guidance>",
-      "decision": "<applied|not_applicable|needs_clarification>",
-      "evidence": "<where this guidance was applied, or why it does not apply>"
-    }
-  ],
-  "risk_markers": {
-    "missing": "TBD - NEED NCS CONFIRMATION",
-    "weaker": "COMPETITOR BETTER - NEED REVIEW",
-    "competitor_source": "SOURCE FROM COMPETITOR - NEED NCS CONFIRMATION"
-  },
-  "sections": [
-    {
-      "title": "<section title selected from source_map>",
-      "blocks": [
-        {
-          "type": "paragraph",
-          "text": "<agent-authored text from confirmed facts>",
-          "source_ref": "<source_map fact id>",
-          "confidence": "confirmed"
-        },
-        {
-          "type": "paragraph",
-          "risk": "competitor_source",
-          "text": "<reference-derived text pending confirmation>",
-          "source_ref": "<source_map fact id>",
-          "confidence": "needs_confirmation"
-        }
-      ]
-    }
-  ],
-  "risk_items": [
-    {"kind": "missing", "text": "<unresolved item tied to source_map>"}
-  ]
-}
-```
+任何问题答不清时，不要把该元素写进正文；先补证据、改成风险项、标为不适用，或向用户澄清。
 
-支持的 block 类型：
+设计时至少完成：
 
-- `paragraph`：正文段落；带 `risk` 时渲染红色风险前缀。
-- `bullets`：项目符号列表；`items` 可以是字符串，也可以是 `{"text": "...", "risk": "...", "source_ref": "..."}`。
-- `table`：表格；单元格等于任一 risk marker 时自动红色粗体。
-- `note`：加粗 note 段落；带 `risk` 时渲染红色风险前缀。
-- `warning`：显式风险段落，使用 `kind` 或 `risk`。
-- `image_placeholder`：图片占位，必须带风险标记，直到真实图片可用。
+- 首页：按模板视觉组织 description、features、applications、风险段落、logo/header/footer、水印和页码节奏。
+- 章节顺序：结合竞品结构、我司既往产品和模板批注决定，不硬编码固定章节。
+- 图形策略：真实图优先；可从竞品 PDF 裁图、从我司 DOCX 抽图、或创建清晰的临时示意图。所有非目标确认图都必须有风险说明。
+- 表格策略：参考模板、目标事实、竞品参考和我司既往产品中有价值的表格密度和样式；缺失值写成明确风险，不交付“待补充”“从来源补充”这类空泛占位。
+- Notes 策略：凡来源表格或模板要求表后 `Notes:`、`Note:`、角标解释、单位说明、stress/ESD/thermal 限制说明、包装/丝印说明，都要按当前表格/图/段落的实际内容重建或在 `source_map.json` 标为不适用；不要静默省略，也不要为了凑格式写泛泛 boilerplate。
+- Notes 内容判断：先看该表/图有没有角标、缩写、单位、测试条件、来源边界、风险项或模板批注要求；Notes 只解释这些具体内容。若没有可解释对象，记录“不适用”比生成空泛 Notes 更好。
+- 目录策略：目录条目和页码要与生成稿一致；如果 Word 自动域不可用，可先生成静态目录并在审计记录中说明。
+- 风险策略：统一使用醒目的风险标记，例如 `TBD - NEED NCS CONFIRMATION`、`COMPETITOR BETTER - NEED REVIEW`、`SOURCE FROM COMPETITOR - NEED NCS CONFIRMATION`。
+- 逐项内容策略：正文段落、features bullets、applications、表格行、图题、Notes、声明和 Important Notice 都要根据当前芯片内容和章节专业目的生成；不要复用“看起来像 datasheet”的通用句子来填版面。
 
-不要把“待映射”“写在这里”“从来源补充”这类占位句交给用户当完成内容。确实缺事实时，用风险 marker 和待确认清单表达。
+最终 DOCX 正文只放 datasheet 内容。来源控制表、批注处置表、格式验证清单等内部审计内容保存在 `source_map.json`、`analysis.json`、评审记录或测试目录，不要塞进交付正文，除非用户明确要求审计稿。
 
-`template_guidance` 里的每条模板批注/注释都必须有处置结果。`applied` 要说明应用到哪个章节、表格、样式或版式事实；`not_applicable` 要说明不适用原因；`needs_clarification` 要进入待确认清单。
+模板或参考稿里的商标、logo、专利、版权和复印限制文字不属于技术正文。需要保留时，把它们放在页脚、封底 notice、首页独立声明区或 `Important Notice`，并先确认品牌主体和措辞适用于目标公司；不要把这类 boilerplate 混在首页 description 段落中。若模板在首页左栏分界线下有独立 logo/trademark 声明区，应按该区域重建，而不是删除或改写成正文句子。
 
-### Step 5: 生成 DOCX
+### Step 5: 创作 DOCX
 
-初始化配置：
+只有输入门禁和目标门禁都通过时才进入本步骤。目标门禁未通过但输入门禁已通过时，不要创建空白 DOCX、假设型 DOCX、交付生成脚本或生成稿渲染目录；改为把阻塞原因、已完成证据和需要用户确认的问题写入 `result.md`。输入门禁未通过时，不写 `result.md`，只向用户索要明确的输入文件路径或附件。
 
-```bash
-python scripts/generate_datasheet.py --init-config <content.json>
-```
+选择能达到目标效果的方法，而不是默认选择脚本。
 
-生成 DOCX：
+可用路线：
 
-```bash
-python scripts/generate_datasheet.py --config <content.json> --output <draft.docx>
-```
+1. **模板改造路线**：复制 `style_template` DOCX，清理占位正文，保留页眉页脚、水印、section、样式、编号、表格样式和图片关系，再用 OOXML/python-docx/Word COM 写入新内容。
+2. **混合资产路线**：从 `reference_datasheet` 或 `company_prior_datasheet` 抽取/裁剪图形，按 `source_map.json` 记录来源和风险，再插入 DOCX。
+3. **自定义生成路线**：为当前任务写一次性临时生成脚本，放在验证工作目录；脚本服务于当前设计，不沉淀进 skill，除非它对未来同类任务明显可复用。
 
-生成器只渲染 `content.json`。当 `sources.input_documents` 中存在可读取的 DOCX `style_template` 时，生成器会复用其样式、编号定义、section properties、页眉页脚和表格基础样式，并清除模板占位正文。模板批注/注释必须先进入 `template_guidance` 并逐条处置；生成器只在输出中移除批注载体，不删除已经转写成规则的内容。PDF 模板只作为人工视觉参考，不会被 renderer 当作 DOCX 样式源。
+生成时必须注意：
 
-最终交付 DOCX 正文只放 datasheet 内容。来源控制表、模板批注处置表、格式验证清单等内部审计内容保存在 `source_map.json`、评审记录或单独审计稿中；只有需要非交付审计稿时，才显式设置 `output_options.include_audit_sections: true`。
+- 保留或重建模板页眉页脚和水印，不要用纯文本页眉页脚替代复杂模板。
+- 替换旧型号、旧日期、旧页脚公司信息和模板占位正文。
+- 清理模板商标/法务样板句；只在合适的 notice/footer/独立声明区位置保留确认适用的法务文字。
+- 重建表格和图形下方的 `Notes:`/`Note:`，包括角标、缩写、测试条件、绝对最大额定说明、热性能说明和包装/丝印说明；每条 Notes 必须能指向当前表格/图形中的具体字段、角标或来源边界。
+- 保留或重建两栏/单栏 section、分页、目录、表格标题行、Notes、caption 和页码。
+- 插入真实图或清楚标风险的示意图；不要让“空白占位框”冒充完成内容。
+- 每个竞品来源、弱于竞品项、目标事实缺失项都要在正文或风险清单中醒目标注。
 
-### Step 6: 校验并汇报
+### Step 6: 校验并迭代
 
 运行结构校验：
 
@@ -225,24 +193,20 @@ python scripts/generate_datasheet.py --config <content.json> --output <draft.doc
 python scripts/verify_datasheet.py --docx <draft.docx> --expect "<required text>" --risk-marker "<red marker>" --forbid-comments --forbid-body-text "<template placeholder text>"
 ```
 
-如模板事实要求两栏或页眉页脚，增加：
-
-```bash
-python scripts/verify_datasheet.py --docx <draft.docx> --require-body-two-column --min-body-section-header-footer-refs 1
-```
-
-交付稿还必须禁止模板残留、内部审计章节和错误页眉页脚：
+按实际模板事实增加检查，例如：
 
 ```bash
 python scripts/verify_datasheet.py --docx <draft.docx> \
   --forbid-body-text "SOURCE AND RISK CONTROL" \
   --forbid-body-text "TEMPLATE GUIDANCE DISPOSITION" \
   --forbid-body-text "FORMAT VERIFICATION REQUIREMENTS" \
-  --forbid-header-footer-text "<template-placeholder-or-old-part-number>" \
-  --forbid-header-footer-text "<old-company-or-template-brand>" \
+  --forbid-header-footer-text "<old-part-number-or-placeholder>" \
+  --expect "Notes:" \
   --min-tables <expected-minimum-table-count> \
   --min-drawings <expected-minimum-figure-count>
 ```
+
+校验时抽查正文中的创作内容：每类可见元素至少能回指到 `source_map.json` 或分析记录中的事实、版式规则、风险项、来源边界或用户要求。发现泛泛模板句、无来源表格行、无对象可解释的 Notes、无依据 caption 或无适用主体的声明时，退回 Step 3/4 修正。
 
 运行版式渲染：
 
@@ -250,7 +214,7 @@ python scripts/verify_datasheet.py --docx <draft.docx> \
 python scripts/render_document.py <draft.docx> --out-dir <draft-render-dir> --pages 1,2-4
 ```
 
-把模板渲染图、我司既往产品渲染图、竞品/参考渲染图和生成稿渲染图放在同一验证目录中对照。若使用 `docx-preview`，模板和生成稿必须使用同一个 engine 与 dpi。生成 side-by-side 对比图：
+生成 side-by-side 对比图：
 
 ```bash
 python scripts/compare_renders.py \
@@ -259,62 +223,79 @@ python scripts/compare_renders.py \
   --out-dir <visual-compare-dir>
 ```
 
-检查目标型号、版本、日期、pin 名、兼容声明、关键章节、风险标记、来源标注、占位标注、标题 styleId、TOC 样式、列表 numId、Notes/Note、body 级 section、页眉页脚引用、表格数量、图片数量、首页密度、分栏、图表位置、标题层级、模板批注/注释已转成 `template_guidance` 并逐条处置、模板批注载体不得残留、模板占位正文不得残留、页眉页脚替换。查看 `compare_renders.py` 生成的 side-by-side 图和 `visual_comparison.json`，把明显差距反馈回 Step 3/4：页数过少、首页模块错位、图表密度不足、目录缺失、连续表格断裂、内部审计内容入正文、页眉页脚仍是模板占位，都必须修正或标为 failed。
+目标门禁通过并生成 DOCX 后，如果没有生成稿渲染图，或没有把生成稿与模板、竞品/参考和我司既往产品的视觉图对照，整体结论不能是 `passed`。目标门禁未通过但输入门禁已通过时，不运行生成稿校验；结论应说明 `blocked-needs-clarification` 或等价状态。输入门禁未通过时，不写校验结论，只向用户索要明确的输入文件路径或附件。
 
-如果没有生成稿渲染图，或没有把生成稿与模板视觉图对照，整体结论不能是 `passed`。汇报生成产物、`content.json`、`source_map.json`、分析报告、渲染图、资产 manifest、校验报告、输入文档角色、模板格式事实清单、缺失项、弱项、参考来源项、占位项、待确认项，以及 passed、failed、not run 的验证项和原因。
+### Step 7: 汇报产物和风险
+
+汇报必须包含：
+
+- 输入文档角色判断及证据。
+- 若目标门禁通过并生成 DOCX，列出 DOCX、`source_map.json`、`analysis.json`、渲染图、side-by-side 对比图、资产 manifest 或临时生成脚本路径。
+- 若输入门禁未通过，只列出需要用户逐项补充的输入文件路径或附件；不要伪列任何产物路径。
+- 若目标门禁未通过但输入门禁已通过，列出已完成的角色判断、证据包、`source_map.json` 或等价记录、`result.md` 路径，以及阻塞的澄清问题；不要伪列 DOCX 产物。
+- 已确认事实、竞品来源事实、弱于竞品项、缺失项、占位项和待用户确认项。
+- 结构校验、视觉校验、CLI/平台实测的结论：`passed`、`failed` 或 `not run`；`not run` 必须说明原因。
+- 仍然无法确认的产品事实和需要 NCS/产品/封装负责人确认的项目。
 
 ## When to Stop and Ask for Help
 
-**立即停止并澄清：**
+立即停止并澄清：
 
-- 无法判断输入文档角色，或缺少可用的格式来源
-- pin-to-pin 兼容目标不明确
-- 模板批注、Notes/Note 或版式事实无法判断
-- 模板批注/注释无法判断是否适用，且无法写出明确处置证据
-- 来源数据互相冲突，且无法确定优先级
-- 目标事实缺失，但用户不允许风险标注或占位
-- 用户未确认风险标注格式
-- 渲染或校验失败，且无法判断生成文档是否符合模板
+- 用户没有提供明确的输入文件路径或附件；此时不要扫描目录、不要枚举当前工作区或现有资产，也不要创建任何本轮产物。
+- 无法判断输入文档角色，或缺少可用格式来源。
+- 目标芯片型号、输出品牌/法务主体、版本策略或交付语言未提供，且无法从用户明确文字确认。
+- pin-to-pin 兼容目标不明确。
+- 用户只提供竞品、模板和可选我司既往产品，但没有说明要生成哪个目标产品；不要从任一输入文件擅自选择目标。
+- 用户不允许风险标注，但目标事实缺失或来自竞品。
+- 模板批注、Notes、目录规则、页眉页脚或关键版式事实无法判断。
+- 来源数据冲突，且无法确定优先级。
+- 渲染或校验失败，且无法判断生成文档是否符合模板、用户意图和来源证据。
 
-**不要猜测未确认的产品参数、封装兼容性、缺失功能或来源归属。**
+不要猜测未确认的产品参数、封装兼容性、缺失功能或来源归属。
 
 ## When to Revisit Earlier Steps
 
-**返回 Step 1：**
+返回 Step 1：
 
-- 用户更换任一输入文档角色
-- 用户调整目标芯片、封装、兼容对象、输出语言或标注策略
+- 用户更换任一输入角色。
+- 用户调整目标芯片、封装、兼容对象、输出语言或标注策略。
 
-**返回 Step 2：**
+返回 Step 2：
 
-- 模板版本变化
-- 渲染图和 OOXML 解析结果不一致
-- 目录、列表、批注、表格或图片规则仍不确定
+- 模板版本变化。
+- 渲染图和 OOXML 解析结果不一致。
+- 目录、列表、批注、表格或图片规则仍不确定。
 
-**返回 Step 3：**
+返回 Step 3/4：
 
-- 发现封装或 pinout 不兼容
-- 发现参考来源、弱于参考项或图片来源不满足风险标注要求
+- 发现封装或 pinout 不兼容。
+- 发现参考来源、弱于参考项或图片来源不满足风险标注要求。
+- 模板、产品事实、竞品参考、我司既往产品或用户意图互相冲突。
 
 ## Remember
 
-- 按角色而不是文件名处理输入。
-- 先做 `source_map.json`，再写 `content.json`。
-- 新 datasheet 的格式和排版严格参照确认过的格式来源，但不得保留模板占位正文或 Word 批注载体。
-- 按模板视觉渲染结果排版：先看模板视觉，再编排 `content.json`，生成后用 side-by-side 对比回看，不要只靠 XML 结构检查。
-- 模板标注/注释是生成规则来源；必须先转成 `template_guidance` 并逐条处置，不得直接丢弃。
-- 脚本不是内容作者；你必须完成事实判断、章节编排和风险标注。
-- 目标产品事实优先；参考文档只能提供框架、对标和带风险的临时来源。
-- 缺失项、弱项、参考来源项、占位项、未确认项必须醒目标注。
+- 按角色处理输入，不按文件名猜。
+- 输入门禁先于所有脚本和产物：没有用户逐项指定的文件路径或附件时，先问用户要输入，不扫描目录、不枚举现有资产、不创建 `source_map.json`、`result.md` 或 DOCX。
+- 不从竞品或我司既往产品反推目标产品；目标对象必须来自用户明确要求。
+- 脚本是辅助工具，不是交付质量的上限。
+- 最终 datasheet 由你基于证据自主设计；必要时写一次性临时生成脚本。
+- 所有智能体创作内容都要根据当前芯片内容、来源证据和 datasheet 专业目的生成；不能为了填版面、凑格式或模仿模板而写无具体依据的文字。
+- 新 datasheet 严格参照确认过的格式来源和事实来源，但不得保留模板占位正文或 Word 批注载体，也不得继承来源文档中的明显错误。
+- 不把模板的商标、版权、专利、保密或复印限制样板句当作 description 正文；先判断它是页脚、notice、批注规则还是应删除的模板残留。
+- 模板首页分界线下的 logo/trademark 声明区是独立声明区，不是 description 正文；需要保留时按模板位置和样式重建。
+- 表格后的 `Notes:` 是 datasheet 内容的一部分；除非明确不适用，否则生成稿和校验清单都要覆盖，并且 Notes 必须根据该表格/图形的实际内容生成。
+- 不把某一次用户请求、某个型号、某个文件路径、某个调试用参考结果或某句样例文字直接沉淀进 skill；先抽象成未来同类任务仍成立的角色、判断标准、禁止事项或验证步骤。
+- 模板批注/注释必须转成规则并逐条处置。
+- 目标产品事实优先；竞品只能提供框架、对标和带风险的临时来源。
+- 缺失项、弱项、参考来源项、占位项和未确认项必须醒目标注。
 - 不声明没有渲染证据支撑的版式结论。
 
 ## Integration
 
 **Bundled scripts:**
 
-- `scripts/render_document.py` - 渲染 DOCX/PDF，用于模板识别和生成结果视觉比对
-- `scripts/compare_renders.py` - 对模板和生成稿的 PNG 渲染结果做 side-by-side 视觉对比并输出 `visual_comparison.json`
-- `scripts/analyze_sources.py` - 解析角色化 DOCX/PDF 来源，输出结构、文本、样式、批注、表格、图片、目录线索和版式线索
-- `scripts/extract_assets.py` - 从我司既有产品文档抽取可复用图片，并按配置排除不兼容资产
-- `scripts/generate_datasheet.py` - 生成配置模板并按配置生成目标 DOCX
-- `scripts/verify_datasheet.py` - 检查关键文本、样式、目录线索、编号、风险标注、表格、图片、页眉页脚和未确认项
+- `scripts/render_document.py` - 渲染 DOCX/PDF，用于模板识别、生成结果视觉比对和 Word 等价验证。
+- `scripts/compare_renders.py` - 生成 side-by-side 视觉对比图并输出 `visual_comparison.json`。
+- `scripts/analyze_sources.py` - 解析角色化 DOCX/PDF 来源，输出结构、文本、样式、批注、表格、图片、目录线索和版式线索。
+- `scripts/extract_assets.py` - 从 DOCX 来源抽取可复用图片；PDF 裁图可按任务写临时脚本。
+- `scripts/verify_datasheet.py` - 检查关键文本、样式、目录线索、风险标注、表格、图片、页眉页脚和未确认项。
