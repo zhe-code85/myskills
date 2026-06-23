@@ -1,2 +1,20 @@
 .claude/
 .codex/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python env/cache
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
