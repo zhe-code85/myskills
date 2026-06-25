@@ -1,3 +1,6 @@
 # Python dependencies for ncs-datasheet-gen scripts
 docxtpl>=0.16.8
 PyYAML>=6.0
+lxml>=4.9
+PyMuPDF>=1.23
+pywin32>=306; platform_system == "Windows"
