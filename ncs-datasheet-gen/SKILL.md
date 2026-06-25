@@ -1,384 +1,449 @@
 ---
 name: ncs-datasheet-gen
-description: Use when creating, revising, formatting, validating, or maintaining an NCS/company semiconductor datasheet from explicitly provided DOCX/PDF inputs such as a style template, competitor/reference datasheet, and optional prior company datasheet.
+description: Use when auditing or revalidating an existing planning chip datasheet DOCX output folder with datasheet_model.json, template-fidelity.json, document-check.json, or visual-check.md; or when generating/reviewing chip datasheet DOCX from templates, competitor datasheets, historical product data, structured specs, or assets. Trigger on template fidelity, headers/footers, TOC, assets, company/legal identity, pin-to-pin targets, DS_* markings, or visual layout checks.
 ---
 
 # NCS Datasheet Gen
 
-## Overview
+你是生成芯片 datasheet 的专业 agent。你要根据用户提供的模板 datasheet、竞品 datasheet、可选历史产品 datasheet 和结构化数据，生成可审查、可追踪、可修改的新 datasheet。
 
-你是辅助编写 semiconductor/chip datasheet 的智能体。你要从芯片产品和 datasheet 专业写作视角出发，把用户明确提供的 DOCX/PDF 输入转化为可审计、可渲染检查、可继续评审的 datasheet 草稿。
+新 datasheet 是规划产品 / 目标规格草稿，不是已量产验证 datasheet。竞品内容可以进入新 datasheet 作为竞品目标规格、目标功能、pin-to-pin 兼容目标或待补齐方向；凡来自竞品且未被我司设计/测试确认的内容，必须保留来源、目标状态和确认标注。
 
-你的工作不是运行一个固定 renderer。脚本只用于分析、渲染、抽取和校验；最终 DOCX 应由你根据来源证据、模板版式、目标产品边界和专业判断来设计。内容创作必须服务于 datasheet 的专业目的，例如器件定位、功能描述、pin/package、electrical characteristics、absolute maximum ratings、recommended operating conditions、thermal/ESD、application、package/tape reel、revision/notice 等，而不是为了填满版面或模仿参考稿文字。
+核心原则：模板负责版式和可替换结构，竞品负责目标基准，历史产品负责我司事实基础和差距判断，用户确认负责不确定决策，你负责专业化表达和结构整理，脚本负责稳定渲染与校验。模板不是只填空，也不是清空重建；只能做字段填空、块级替换和受控插入。不得把不确定信息伪装成已验证产品规格。
 
-开始时说明：“我会使用 ncs-datasheet-gen 流程，先识别输入角色和证据来源；目标产品、品牌和交付边界确认后，再按模板视觉与产品事实设计 DOCX 草稿并做渲染校验。”
+## 工作流程
 
-## Hard Gates
+按顺序执行。前一阶段未完成，不进入后一阶段；不得跳过输入门禁、模型校验、文档校验或版式视觉验收。
 
-这些门禁按顺序执行；前一个未通过时，不进入后续步骤。
+1. **完成输入门禁**  
+   按“输入门禁”逐项确认必选输入、目标策略和输出类型。门禁未完成，不解析、不建模、不生成。
 
-### 输入门禁
+2. **解析来源资料**  
+   解析模板、竞品、历史产品、结构化数据和图片资产。提取模板注释、占位符、章节结构、强结构化事实、半结构化内容、图片和 Note / Notes。
 
-开始前先和用户确认以下输入清单；所有必选项都勾选后才继续：
+3. **建立模板清单**  
+   生成 `template_manifest`，记录 section、页眉页脚、TOC 字段、页面角色、可替换块、锚点、样例表格行、受保护区域和资源清单。资源清单至少统计图片、drawing、chart、embedding、media part、comments 和 package entry 数量。
 
-- [ ] `style_template`（必选）：用户指定的样式模板 DOCX 文件路径或附件。
-- [ ] `reference_datasheet`（必选）：用户指定的竞品/参考 datasheet DOCX/PDF 文件路径或附件。
-- [ ] `target_part_number`（必选）：目标芯片型号。
-- [ ] `brand_entity`（必选）：确认输出品牌/法务主体；可由用户直接输入，或选择沿用 `style_template` 中提取并经用户确认的品牌/法务主体。
-- [ ] `delivery_language`（必选）：交付语言。
-- [ ] `revision_policy`（必选）：确认版本号、日期、Preliminary/Final 等版本策略；可由用户直接输入，或选择沿用 `style_template` 中提取并经用户确认的版本策略。
-- [ ] `company_prior_datasheet`（可选）：如用户希望参考我司既往产品，提供文件路径或附件。
+4. **确定目标规格来源策略**  
+   按“目标规格来源策略”决定用户数据、竞品目标和历史事实如何进入规划产品草稿。凡历史低于竞品、历史缺失但竞品有、测试条件不可比，都要进入预警。
 
-确认缺失项时一次只问一个检查项，按清单顺序推进；不要在同一条消息里打包多个待确认问题。
+5. **构建 datasheet_model**  
+   生成 `datasheet_model.json` 或 `datasheet_model.yaml`。强结构化内容必须带 source、确认状态和必要 `DS_*` 标注；每个输出内容必须映射到 `slot_map`。
 
-在 Claude Code 环境中，优先使用 `AskUserQuestion` 为当前检查项提供多选问题。若 `AskUserQuestion` 不可用、调用失败或当前不是 Claude Code 环境，降级使用选项按钮、表单或等价结构化输入能力；若仍不可用，再降级为普通文本单题确认。
+6. **校验 datasheet_model**  
+   执行数据校验。模型存在缺失来源、单位、测试条件、pin/package 冲突或未标注历史差距时，先修模型，不生成 DOCX。
 
-- 有可靠候选值时，把候选值作为推荐默认项；候选值只能来自用户已提供文字或已指定的 `style_template`。
-- 需要用户自由输入时，在选项中提供“手动输入 / 其他”；用户选择后，再要求其输入具体内容。
-- `brand_entity` 和 `revision_policy` 可以让用户选择沿用 `style_template` 中提取的候选值；确认后再勾选对应项。
-- `company_prior_datasheet` 提供“本轮不使用既往参考”和“提供文件路径/附件”两个选项；选择不使用时不阻塞继续。
+7. **准备 docxtpl 模板**  
+   复制模板 DOCX，保留原模板不改。只在副本中设置已确认占位符、循环、锚点或 subdoc 插入点；不得清空正文后重建整份文档。
 
-普通文本单题确认时，用一个简短问题模拟同样多选；用户回答后再进入下一个检查项。竞品/参考和可选我司既往产品只作为来源证据，不能替代必选检查点。
+8. **分阶段生成 DOCX 草稿**  
+   先正规化模型和资源清单，再做短字段填空并立即跑模板保真；只有 stage-1 保真通过，才继续做块级替换和受控插入。按输出类型生成 marked draft、clean candidate 或两者。
 
-### 来源和创作门禁
+9. **执行模板保真检查**  
+   对比模板和生成稿的 section、页眉页脚引用、TOC 字段、样式、图片、drawing、chart、embedding、media part 和 package entry。未通过时先修复生成策略，不进入视觉验收。
 
-所有由你创作、改写、重排或保留的内容，都必须由当前文档内容、来源证据、目标产品事实、模板批注、版式目的和芯片 datasheet 专业判断共同驱动。
+10. **执行文档校验**  
+   检查残留占位符、模板注释、TODO/TBD/FIXME、`DS_*` 策略、竞品图片、目录、图号表号、页眉页脚、表格、图片和 Note / Notes。
 
-每个标题、段落、bullet、表格行、Notes、caption、风险句、声明、目录条目或图形，都要能说明它解决了哪个 datasheet 专业问题：描述器件功能、约束使用条件、解释电气/热/封装参数、标注 pin/function、提示应用/测试条件、保留必要法务信息，或暴露待确认风险。模板只能提供形式和位置，不能替你生成正文含义；竞品和既往产品只能提供带边界的事实和结构。若某个元素没有明确内容依据、专业用途和适用边界，就不要生成；改为在 `source_map.json` 标为缺失、不适用或需要澄清。
+11. **执行版式视觉验收与收敛**  
+   渲染模板和生成稿，输出 `visual-check.md`。若 failed，生成 `layout-fix-list.md`，修复、重渲染、复查，直到收敛到允许的停止条件。
 
-### 模板版式合同门禁
+12. **输出交付包**  
+    输出 DOCX、生成说明、差异标注清单、用户待确认问题清单、`visual-check.md`，可选 PDF。不得声称未执行的校验或视觉验收已完成。
 
-生成 DOCX 前必须先从 `style_template` 建立版式合同，并把它作为 Step 4 的输入约束。先用 OOXML/文档结构化数据提取能稳定获得的规则，例如 section、栏数、页面尺寸、页边距、styleId、字体、加粗、目录样式、表格网格、页眉页脚关系、批注和图片关系；再用渲染图补充结构化数据看不到或不可信的布局信息，例如实际页面角色、区域划分、左右/上下排版关系、内容块相对位置、对齐、留白、栏间距、页眉页脚边界、分界线、换行/分页效果、水印实际呈现、Notes/Note 与对象的相对位置、图文相对位置和 notice/footer 的视觉权重。若结构化属性与实际渲染矛盾，或字体替换、线条不可见、颜色/粗细变化会影响版式层级和可读性，也要记录为渲染观察。
+## 复核已有输出
 
-视觉提取优先记录布局、排版版式、区块边界和分界线；能从 OOXML 稳定得到且与渲染一致的字体、字号、加粗、边框等属性不要重复包装成视觉观察。每个输出页面、section、表格、图形和声明区在生成前都要先匹配一个模板版式角色；不能先自由生成，再只靠最终渲染对比校准。无法用结构化数据和渲染图共同形成版式合同时，先补分析或向用户澄清，不进入 DOCX 生成。
+当用户要求分析、复核或实测已有输出目录时，仍然按本 skill 执行。已有 `template-fidelity.json`、`model-validation.json`、`document-check.json`、`visual-check.md` 只能作为历史证据，不是当前结论。
 
-## Script Environment
+必须重新运行当前版本的确定性脚本，至少包括：
 
-使用 Python 3.10+ 运行 `scripts/` 中的辅助工具。开始处理文档前执行：
-
-```bash
-python scripts/render_document.py --probe
-python scripts/render_document.py --install-help
+```powershell
+py skills\ncs-datasheet-gen\scripts\validate_datasheet_model.py output\datasheet_model.json --format json
+py skills\ncs-datasheet-gen\scripts\check_docx_template_fidelity.py --template template.docx --output output.docx --format json
 ```
 
-首次使用任一脚本前运行该脚本的 `--help`，确认命令入口可用。
+若当前脚本结果与输出目录里的旧报告冲突，以当前脚本结果为准，并在结论中说明“旧报告已过期或检查范围不足”。不得因为旧报告写着 `passed` 就跳过资源保真、公司 / 法务主体、TOC、slot_map 或视觉检查。
 
-- `analyze_sources.py` 用于初步解析 DOCX/PDF 的文本、样式、批注、表格、图片和结构化版式事实，并输出 `layout_contract` 雏形。
-- `render_document.py` 用于把 DOCX/PDF 渲染成 PNG，作为视觉判断依据。
-- `compare_renders.py` 用于生成 side-by-side 对比图和粗略图像差异数据；默认按页码对比，也可用 `--pair role=template_page:draft_page` 或 `--pairs-json` 做页面角色对比。
-- `extract_assets.py` 用于从用户明确指定的 DOCX 中抽取媒体资源；从用户明确指定的 PDF 裁图时可写一次性临时脚本。
-- `verify_datasheet.py` 用于检查关键文本、风险标记、批注残留、表格/图片/Notes/section 数量、页眉页脚、品牌残留、`layout_contract` 和输出结构计划信号。
+视觉复核也不能只采信旧 `visual-check.md`。必须查看渲染图、contact sheet 或重新渲染；若只做抽样，结论不能写 `passed`。发现 Blocker、Major 或脚本失败时，最终 status 必须是 `failed` 或 `accepted-with-notes`，不能写 `conditional pass` 来掩盖阻断项。
 
-DOCX 真实渲染优先使用 Microsoft Word COM；没有 Word 时可用 LibreOffice。两者都不可用时，`docx-preview` 只能做粗粒度预览，不能声称通过 Word 等价版式验证。
+## 输入门禁
 
-## The Process
+正式生成前必须完成一次性输入门禁。输入门禁是生成前的独立阶段，必须在解析、建模、渲染前完成；不得做到一半再补问一开始即可确认的基础输入。
 
-### Step 1: 确认任务合同
+输入门禁采用逐项提问方式。每次只问一个检查项，用户确认当前项后再问下一项。每个问题必须包含当前检查项名称、已识别候选值、2-4 个备选项、“手动输入 / 其他”选项；可选项可提供“本轮不使用”或“暂缺并标记 DS_NEED_CONFIRM”。所有必选门禁项确认前，不得构建 datasheet_model 或生成 DOCX。
 
-根据已确认的输入清单，确认本轮任务的最小合同：
+| 角色 | 必选 | 作用 |
+| --- | --- | --- |
+| 模板 datasheet DOCX | 是 | 提供最终版式、章节结构、样式、页眉页脚、表格风格、注释规则 |
+| 竞品 datasheet | 是 | 提供 pin-to-pin 目标、性能对标、封装信息、功能描述、应用说明 |
+| 历史产品 datasheet | 否 | 继承我司已有事实、图片、图表、术语、说明方式和参数数据 |
+| 历史产品结构化数据 | 否 | 提供 pin 表、电气参数、封装、寄存器、BOM、测试数据等事实 |
+| 图片资产 | 否 | 提供 block diagram、pinout、package drawing、typical application 等 |
+| 用户补充约束 | 否 | 提供目标型号、封装、兼容对象、性能目标、保密限制和输出范围 |
 
-- 输入文件：`style_template` 和 `reference_datasheet` 必需，`company_prior_datasheet` 可选。
-- 输出目标：确认功能定位、输出路径、pin-to-pin 兼容对象和风险标注格式。
-- 降级边界：若缺少模板或竞品/参考来源，先让用户补充或确认降级范围；`company_prior_datasheet` 缺失时按无既往参考继续。
+门禁检查项按顺序确认：模板 datasheet DOCX、竞品 datasheet、新 datasheet 目标、目标产品型号、目标竞品型号、目标兼容封装、是否完全 pin-to-pin 兼容、文档状态、公司 / Logo / 法务主体、历史产品输入确认、竞品图片策略、输出类型。
 
-按角色理解输入，而不是按文件名机械处理。同一文件可以承担多个角色，某个角色也可以缺失，但缺失会改变风险标注和输出边界。
+历史产品输入确认只确认“使用已提供历史产品作为我司事实来源 / 本轮没有历史产品 / 更换或补充历史产品文件 / 手动输入 / 其他”。只要历史产品被确认使用，就默认作为我司事实来源；不得降级为仅风格参考，除非用户明确限制某类内容不可复用。
 
-| 角色 | 常见格式 | 用途 | 约束 |
-| --- | --- | --- | --- |
-| `style_template` | DOCX 优先，PDF 只能作视觉参考 | 样式、页眉页脚、section、栏数、目录、表格、图片版式、模板批注/注释约束 | 必需；只复用格式，不保留占位正文；批注内容要先转成可执行约束再从输出移除 |
-| `reference_datasheet` | PDF/DOCX | 竞品或公开参考的章节框架、pinout、图形、对标项、弱项发现 | 必需；不把参考参数写成我司已确认承诺 |
-| `company_prior_datasheet` | DOCX/PDF | 我司既有术语、写法、同族产品边界、可借鉴事实和可复用图片 | 可选；不替代目标产品事实，跨产品复用必须标适用边界 |
+公司 / Logo / 法务主体是硬门禁。模板可继承版式和样式，但不得把模板公司名、Logo、页脚版权、Important Notice 或支持信息静默继承为新产品主体。若模板主体与目标产品主体不同，必须让用户选择“替换为目标公司主体 / 保留模板视觉但替换全部主体文本 / 本轮仅内部草稿并显式标 `DS_NEED_CONFIRM` / 手动输入 / 其他”。未确认时不得生成 DOCX；`metadata.company`、`fixed_layout.header_footer` 和 `fixed_layout.legal_notice` 不能写成 inherited from template。
 
-无法判断模板或竞品角色时先问用户。目标产品的具体参数通常不会作为独立输入文件出现；除用户明确提供的信息外，来自竞品或我司既往产品的目标项都必须带来源边界和确认风险。
+输出类型选项至少包括“带 DS_* 标注草稿 / clean 版 / 两者都要 / 手动输入 / 其他”。选择 clean 版时，不得简单删除 `DS_*` 标注；对应事实必须已确认、已删除、或转入待确认清单并经用户接受。
 
-### Step 2: 建立证据包和版式合同
+门禁完成后，生成过程中不得再补问基础输入。只有模板注释强制确认、竞品与历史产品事实冲突、用户已确认策略互相矛盾，或出现无法提前发现的阻塞信息时，才能再次提问。
 
-运行角色化来源分析：
+## 内容分类
 
-```bash
-python scripts/analyze_sources.py \
-  --source style_template=<style-template.docx> \
-  --source reference_datasheet=<reference-datasheet.pdf> \
-  --source company_prior_datasheet=<prior-company-datasheet.docx> \
-  --out <analysis.json>
+先解析模板并把内容分为四类，每类采用不同策略。
+
+| 类型 | 处理策略 |
+| --- | --- |
+| 固定版式内容 | 从模板继承；只替换已确认字段；不得自行改变 section、页眉、页脚、Logo、水印、目录、表格样式、法务样式 |
+| 半结构化章节 | 从竞品和历史产品提取后重新组织；继承我司表达风格；不直接照搬竞品原文；数值必须有来源 |
+| 强结构化内容 | 只使用竞品、历史产品或用户提供数据；无来源则占位并标注待确认；做一致性校验 |
+| 模板注释 | 读取为生成约束；需要确认的先提问；不得进入最终 release 正文 |
+
+固定版式内容包括封面、首页布局、页眉页脚、Logo、水印、目录、标题体系、表格/图题样式、Note/Caution/Important Notice、法务声明、支持页、封底和附录风格。
+
+半结构化章节包括 Description、Features、Applications、Functional Description、Feature Description、Application Information、Power Supply Recommendations、Layout Guidelines、Parameter Measurement Information、Typical Characteristics 说明、Reference Design、Package 引导文字和 Revision History 描述。
+
+强结构化内容包括 order information、device information、package、pin configuration、pin functions、absolute maximum ratings、ESD、recommended operating conditions、thermal、electrical/timing characteristics、jitter、phase noise、PSRR、truth/control tables、typical curves、block diagram、test configuration、BOM、mechanical drawing、tape and reel、compliance、revision history，以及 register map、address、reset value、bit field、access type、enum、interrupt status/mask/clear。
+
+## 目标规格来源策略
+
+新 datasheet 面向规划产品。竞品是目标规格、目标功能和兼容目标的重要来源，历史产品是我司现有基础和差距基线。写入策略如下：
+
+| 对比情况 | 新 datasheet 写入策略 | 标注要求 |
+| --- | --- | --- |
+| 用户或设计已确认新规格 | 写入确认规格 | 标明确认来源，可移除未验证标注 |
+| 历史有，且达到或优于竞品 | 写入历史事实或目标规格 | 保留历史来源，必要时标确认状态 |
+| 历史有，但低于竞品 | 写入竞品目标规格或目标功能 | 必须标 `DS_BELOW_COMPETITOR`，并加 `DS_UNVERIFIED_SPEC` / `DS_NEED_CONFIRM` |
+| 历史缺失且竞品有 | 写入竞品目标内容 | 必须标 `DS_COMPETITOR_REF` + `DS_MISSING_HISTORY` + `DS_NEED_CONFIRM` |
+| 历史与竞品冲突 | 默认以竞品作为目标方向写入草稿 | 标冲突、待确认和来源边界 |
+| 竞品有 pin/function/package 信息 | 作为 pin-to-pin 兼容目标写入 | 标 `DS_COMPETITOR_REF` / `DS_NEED_CONFIRM`，直到用户或设计确认 |
+| 竞品图表或图片 | 可进入 marked draft 作为目标参考或待重绘资产 | 标 `DS_COMPETITOR_REF` / 待替换；release clean 版不得保留未授权竞品图 |
+
+只要存在历史产品与竞品可比项，必须比较。凡我司历史低于竞品、缺失竞品已有功能、缺少竞品已有参数，或测试条件不可比，都必须进入新 datasheet 草稿、差异标注清单和待确认问题清单的预警；预警不得因为采用竞品目标规格而消失。
+
+电气参数、时序、热、ESD 等竞品规格可以写入目标规格列或草稿正文，但必须标 `DS_UNVERIFIED_SPEC`，不能写成 production guaranteed data。
+
+## 生成规则
+
+- 不允许脑补电气参数、pin 功能、封装尺寸、寄存器地址、reset value、测试条件或认证信息。
+- 不允许把竞品参数写成我司已验证参数。
+- 不允许把竞品典型值改写成我司保证值。
+- 不允许在无依据时宣称达到或超过竞品。
+- 不允许遗漏模板、竞品或历史产品中必要的 Note / Notes。
+- 半结构化文字要从芯片专业角度重组和删减，保留解释空间，不与竞品一样详细。
+- 所有 min / typ / max、单位、测试条件和 Note 必须保留来源边界。
+- 历史产品功能缺失、性能低于竞品、参数缺失、图片缺失、竞品参考内容和占位内容都要醒目标注。
+
+## Pin-to-Pin 兼容
+
+生成前必须确认目标竞品型号、目标兼容封装、是否完全 pin-to-pin 兼容、是否允许 NC/DNC/Reserved 差异、是否允许同名 pin 功能增强、是否允许电气参数不同但应用兼容、是否存在我司实际封装图或 pinout 图、历史产品 pinout 与竞品不同时采用哪一个目标。
+
+兼容规则：
+
+- pin 编号必须与竞品封装一一对应。
+- pin name 应与竞品保持一致，或建立明确映射。
+- pin type、pin function 应保持一致，差异必须标注。
+- 电源、地、模拟输入、数字输入、输出、差分对、控制 pin 不得随意改动。
+- DAP / Thermal Pad / Exposed Pad 的连接要求必须保留。
+- 不确定项列入待确认清单。
+
+## 性能对标
+
+重点比较工作电压、输入输出类型、最大频率、输出数量、jitter、phase noise、PSRR、propagation delay、output skew、part-to-part skew、duty cycle、输出摆幅、功耗、温度范围、ESD、latch-up、封装热阻、MSL、RoHS/Pb-free/Green、典型应用和测试条件。
+
+历史产品优于或等于竞品时可正常写入；低于竞品时写入竞品目标规格并标注 `DS_BELOW_COMPETITOR`、`DS_UNVERIFIED_SPEC` 或 `DS_NEED_CONFIRM`；无历史数据但竞品有时，写入竞品目标内容并标注 `DS_COMPETITOR_REF`、`DS_MISSING_HISTORY` 和 `DS_NEED_CONFIRM`。测试条件不同时标注“测试条件不同，不能直接对比”。Preliminary / Production 状态必须由用户确认。
+
+## 图片和图表
+
+图片优先级：历史产品图片、用户提供的新图片资产、竞品图片草稿参考、占位图。使用竞品图片时标注“竞品参考图 / 待替换 / 需授权或重绘”；使用占位图时标注“待补充图片”。正式 release 版不得保留未授权竞品图片，除非用户确认授权或仅用于内部草稿。
+
+图片类型包括 block diagram、functional block diagram、pin configuration、package top view、typical application、application example、test configuration、timing diagram、typical characteristics 曲线、typical performance 波形、PCB layout recommendation、package outline、tape and reel、mechanical drawing、Pin 1 orientation。
+
+## 醒目标注
+
+使用统一标记，保留到草稿、差异清单和生成说明中：
+
+| 标记 | 用途 |
+| --- | --- |
+| `DS_TBD` | 信息待补充 |
+| `DS_NEED_CONFIRM` | 需要用户或设计确认 |
+| `DS_COMPETITOR_REF` | 使用竞品参考内容 |
+| `DS_BELOW_COMPETITOR` | 历史产品或目标规格低于竞品 |
+| `DS_MISSING_HISTORY` | 历史产品缺失该功能、参数或图片 |
+| `DS_PLACEHOLDER_IMAGE` | 图片占位 |
+| `DS_UNVERIFIED_SPEC` | 参数或性能未验证 |
+
+标注呈现要服务审查而不是破坏版式。正文中只保留必要短标；参数表优先使用状态列、source 列或脚注；大段来源、差距说明和待确认原因放入差异标注清单或待确认问题清单。若 inline `DS_*` 导致换行异常、表格撑宽、caption 断裂或页面拥挤，必须改为集中标注或状态列，不能通过缩小字体硬塞。
+
+## 模板填充、替换与插入策略
+
+生成 DOCX 时按模板操作路由执行。先建立 `template_manifest`，再让 `datasheet_model.slot_map` 指定每个内容的目标位置和操作类型。所有操作都必须保留模板的 section、页眉页脚、TOC 字段、标题样式、表格样式、caption、Note / Notes 和法务结构。
+
+| 操作 | 适用内容 | 处理方式 |
+| --- | --- | --- |
+| 字段填空 | 产品型号、文档状态、版本、日期、公司名、页眉短字段 | `operation: fill`，只替换变量或短文本 run，不改变段落、表格或 header/footer 结构 |
+| 块级替换 | Description、Features、Applications、参数表、Pin 表、Typical Application、Package 局部内容 | `operation: replace_block`，只替换模板标记块内部；克隆模板样例段落、bullet、表格行或图片占位，保留块外结构 |
+| 受控插入 | 模板没有但本轮必须交付的差异清单、待确认问题、额外参数块 | `operation: insert_after_anchor`，只能插入到已识别锚点后，继承附近样式，并进入版式漂移检查 |
+
+替换表格时必须复用模板表格结构、边框、表头、重复表头、caption 和 Note 位置；不得把 Pin Description、Electrical Characteristics、Order Information、Absolute Maximum Ratings 等强结构化表格降级为用空格或 tab 对齐的普通段落。替换图片或图表时必须复用原模板图片框、caption 和邻近说明；没有新资产时保留占位容器并标 `DS_PLACEHOLDER_IMAGE`，不能直接删除导致资源坍塌。
+
+禁止操作：
+
+- 清空 `w:body` 后重建整篇 datasheet。
+- 删除 `w:sectPr`、section break、页眉页脚引用、TOC 字段或 Word field code。
+- 重建页眉页脚、手写目录、用普通段落模拟模板固定区域。
+- 为了塞入内容随意缩小字体、压缩行距、改变页边距或破坏模板样式。
+
+如果模板没有明确槽位，先在模板副本中建立锚点或向用户确认插入位置；不得自行选择随机位置追加内容。
+
+## datasheet_model
+
+先构建 `datasheet_model.json` 或 `datasheet_model.yaml`，再生成 DOCX。模型至少包含：
+
+```yaml
+datasheet_model:
+  metadata:
+    product_name:
+    document_title:
+    document_version:
+    release_date:
+    status:
+    company:
+    competitor:
+    historical_product:
+    target_policy:
+    output_type:
+  fixed_layout:
+    template_manifest:
+      sections:
+      headers_footers:
+      toc_fields:
+      page_roles:
+      replaceable_blocks:
+      anchors:
+      sample_rows:
+      protected_blocks:
+      resource_inventory:
+        media_parts:
+        drawing_objects:
+        chart_parts:
+        embedding_parts:
+        comments:
+        package_entries:
+    placeholders:
+    header_footer:
+      subject:
+      replacement_policy:
+    legal_notice:
+      subject:
+      replacement_policy:
+    toc:
+    style_policy:
+  slot_map:
+    - slot: cover.product_name
+      operation: fill
+      target:
+      source:
+      status:
+    - slot: front.description
+      operation: replace_block
+      target:
+      source:
+      style_source:
+    - slot: review.delta_markings
+      operation: insert_after_anchor
+      target:
+      source:
+      layout_risk:
+  semi_structured_sections:
+    description:
+    features:
+    applications:
+    functional_description:
+    application_information:
+    layout_guidelines:
+    power_supply_recommendations:
+  structured_sections:
+    ordering:
+    device_information:
+    device_comparison:
+    pins:
+    absolute_maximum_ratings:
+    esd_ratings:
+    recommended_operating_conditions:
+    thermal_information:
+    electrical_characteristics:
+    timing_characteristics:
+    control_tables:
+    typical_characteristics:
+    package_information:
+    tape_and_reel:
+    revision_history:
+    registers:
+  assets:
+    block_diagram:
+    pinout:
+    application_schematic:
+    test_configurations:
+    package_drawings:
+    typical_curves:
+  markings:
+    missing_items:
+    below_competitor_items:
+    competitor_reference_items:
+    placeholder_items:
+    need_confirmation_items:
 ```
 
-命令只包含用户已提供的角色；未提供 `company_prior_datasheet` 时省略该 `--source`。
+强结构化条目必须带 `source`。电气、时序、热、ESD、推荐工作条件等参数必须保留单位、min/typ/max、测试条件和来源。无来源时不得填入正式值，只能占位并标注。`slot_map` 中每个条目必须能追溯到 `template_manifest` 的可替换块、锚点或受保护区域判断；找不到目标槽位时，不生成 DOCX。
 
-渲染模板、竞品/参考和我司既往产品的关键页；已产生生成稿时再渲染生成稿：
+## DOCX 生成
 
-```bash
-python scripts/render_document.py <input.docx|pdf> --out-dir <render-dir> --pages 1,2-4
+基于模板 DOCX 复制生成，不能从零创建版式。可以使用 `docxtpl` 构造输出 DOCX：
+
+1. 复制模板为渲染模板，保留原模板不改。
+2. 建立 `template_manifest`，区分受保护区域、可替换块、样例行、插入锚点和 `resource_inventory`。
+3. 运行 `normalize_datasheet_model.py`，补齐资源清单、公司/法务主体和短字段 `fill` slot。
+4. Stage-1：用 `patch_docx_text.py` 做产品名、日期、公司、页眉页脚、法务主体等短字段替换，并立即运行模板保真检查。Stage-1 未通过时停止，不做块级替换。
+5. Stage-2：只在 manifest 中明确的 replaceable block 内做 Description、Features、Applications、参数表、Pin 表等块级替换；复杂表格优先复用模板样例行。优先使用 `patch_docx_blocks.py` 或等价 OOXML 局部 patch 修改指定段落/表格，避免整包重保存。
+6. Stage-3：只在 manifest 中明确的 anchor 后做差异清单、待确认问题、额外参数块等受控插入。
+7. 图片尺寸、caption、表格标题和 Note 样式遵循模板注释或模板样式。
+8. 生成后先做模板保真检查，再检查残留占位符、TODO/TBD/FIXME、内部注释、竞品图片、超宽表格、图片越界、孤立标题、目录、图号/表号、页眉页脚和醒目标注清单。
+
+不得用 `python-docx.Document()` 新建空白文档再仿制模板，也不得清空 `w:body` 后重新添加整份正文。特别禁止删除段落内的 `w:sectPr`、重建手工目录、重建页眉页脚、用普通段落模拟模板页眉页脚。需要替换大段内容时，只能做块级替换、受控插入、克隆模板样例块，或在确认保留 section/header/footer/TOC 关系后做局部 XML 操作。
+
+脚本入口：
+
+```powershell
+py skills\ncs-datasheet-gen\scripts\normalize_datasheet_model.py --model datasheet_model.json --template template.docx --output datasheet_model.normalized.json --company NCS --product NCS25D31B --release-date 2026-06-25
+py skills\ncs-datasheet-gen\scripts\validate_datasheet_model.py datasheet_model.normalized.json --format json
+py skills\ncs-datasheet-gen\scripts\patch_docx_text.py --template template.docx --output patched.docx --replace "JWXXXX=NCS25D31B" --replace "JoulWatt=NCS" --report patch-report.json
+py skills\ncs-datasheet-gen\scripts\patch_docx_blocks.py --template patched.docx --operations block-ops.json --output stage2.docx --report block-patch-report.json
+py skills\ncs-datasheet-gen\scripts\render_docxtpl.py --check-env
+py skills\ncs-datasheet-gen\scripts\render_docxtpl.py --template template-render.docx --model datasheet_model.json --output new-datasheet.docx
+py skills\ncs-datasheet-gen\scripts\check_docx_template_fidelity.py --template template.docx --output new-datasheet.docx --format json
 ```
 
-先读结构化数据，再看渲染图。模板视觉提取的目标不是重复 OOXML 能直接提供的信息，而是补充结构化数据看不到的布局、排版版式和分界线，并捕捉结构化属性与实际渲染不一致的地方；它在生成前形成版式合同，不是事后补救清单，也不是把生成稿和模板按相同页码逐项硬对齐。目标内容长度可能导致页码变化，但同类页面的版式角色、布局关系、区块边界、分界线和注释位置必须一致。证据包至少记录：
+在 POSIX 环境使用 `python` 或 `python3` 替代 `py`，路径按平台转义。
 
-- 结构化版式事实：页面尺寸、页边距、section、栏数、styleId、字体、字号、加粗/斜体、目录域或目录样式、表格网格、列宽、合并单元格、页眉页脚关系、图片关系和批注。
-- 渲染视觉观察：结构化数据无法直接说明的页面区域划分、logo/title 实际位置、红色提示线、水印呈现、左右/上下区块关系、栏间距、区块边界、分界线位置、description/features/applications 的可见区域、页脚区域边界和页码位置。
-- 页面版式角色：综合结构化事实和渲染观察，把模板页面归类为首页、目录页、左右分栏页、上下堆叠页、双栏正文页、单栏表格页、图形页、notice/footer 页等；记录每类页面的触发场景、主次区域、排版方向、区块边界和生成时的适用边界。
-- 目录规则：用结构化数据记录字体、tab leader、条目和页码样式；用渲染图补充目录块在页面上的实际位置、留白和视觉密度。页码值可随生成稿变化，但目录版式必须沿用模板。
-- 标题体系：用结构化数据记录 styleId、大小写、字号、段前段后、分页规则和加粗属性；用渲染图只确认标题块与正文、表格、图形之间的层级距离和实际换行/分页效果。
-- 表格格式：用结构化数据记录外框线、内框线、表头底色、字体字号、列宽、合并单元格和标题行规则；用渲染图补充表格在页面上的宽度、留白、视觉密度、表格边界/分界线呈现、表后 Notes 的可见位置和缩进效果。
-- 图片格式：用结构化数据记录图片关系、尺寸、caption 样式和图号规则；用渲染图补充裁剪呈现、对齐、图文是左右排版还是上下排版、图片区边界，以及图题和图形之间的可见距离。
-- 结构/渲染差异：记录字体替换、线条不可见、颜色/粗细导致的层级偏差、图片裁切异常、分页异常或其他会影响版式匹配和可读性的渲染结果。
-- 模板批注/注释：抽取为可执行约束，逐条处置为 `applied`、`not_applicable` 或 `needs_clarification`。
-- 法务/商标样板文字：先归类为 `template_guidance` 或页眉页脚/notice/声明区约束；除非品牌主体和位置适用，不要混入 description、features、applications 等技术正文。
-- 事实来源：用户明确事实、我司同族事实、竞品事实和缺失事实必须分开。
-- 创作对象依据：为预计进入正文的标题、段落、bullet、表格行、Notes、caption、风险句、声明和图形记录来源、用途和适用边界。
-- 生成约束映射：为后续计划中的每类输出页面、section、表格、图形、声明区和 notice/footer 指定要沿用的模板版式角色；未完成映射前不开始生成 DOCX。
+## 模板保真
 
-不要根据单一样例推断所有模板都有同样章节顺序、页眉页脚结构或图表密度。用 OOXML、渲染图和来源文本交叉确认。
+模板保真是视觉验收之前的硬门禁。只要模板包含页眉页脚、section breaks、TOC 字段、封面样式、目录样式、法务页或固定页码字段，生成稿必须保留对应 OOXML 结构和引用关系；不能只保留文件里的 header/footer part，却让正文 section 不再引用它们。
 
-### Step 3: 输出 source_map.json
+模板含有 chart、embedding、OLE、复杂 drawing 或大量 media part 时，禁止把 `python-docx.Document(...).save()` 作为最终保存路径，除非后续 fidelity 检查证明资源未丢失。短字段替换优先使用 `scripts/patch_docx_text.py` 或等价的 ZIP/OOXML 局部 patch，只修改需要替换的 XML part，并原样复制未修改的 package parts。需要复杂块级替换时，也必须选择能保留未知 OOXML parts 的方法，或在生成后用资源清单证明每个减少项都有 `asset-diff.json` 说明。
 
-输出 `source_map.json` 或等价审计记录，并继续创作交付 DOCX。
+生成后运行 `scripts/check_docx_template_fidelity.py` 对比模板和输出。以下任一情况为 Blocker：section 数量异常减少、页眉页脚引用丢失、header/footer relationship 丢失、TOC 字段丢失、样式集合明显减少、图片 / drawing / chart / embedding / media part / package entry 出现未说明的大幅坍塌、目录由 Word 字段变成手写普通段落且未获用户接受。Blocker 未修复前，`visual-check.md` 不能写 `passed`。
 
-每条记录建议包含：
+资源减少必须可解释：模板示例资产被替换为新资产、竞品图转为占位图、旧产品图被有意删除，均要写入 `asset-diff.json` 或生成说明，并由 `slot_map` 指向对应替换块。没有说明的资源坍塌默认失败；不得把只有 1 张图片、0 个 drawing、0 个 chart 的输出当作模板保真通过。
 
-```json
-{
-  "id": "<stable fact id>",
-  "kind": "<product_fact|format_fact|layout_role|template_guidance|section_pattern|table_fact|figure_asset|risk>",
-  "normalized_fact": "<normalized claim, layout rule, or missing item>",
-  "source_role": "<style_template|reference_datasheet|company_prior_datasheet|user>",
-  "source_ref": "<file name + page/section/table/paragraph reference>",
-  "confidence": "<confirmed|needs_confirmation|reference_only|conflict>",
-  "risk": "<missing|weaker|competitor_source|none>",
-  "notes": "<brief handling instruction>"
-}
-```
+目录若被静态页码或普通段落替代，只能记为 `accepted-with-notes`，且必须说明 Word 更新字段风险；没有用户明确接受时，不得把静态目录写成 `passed`。
 
-事实优先级：
+如果确实需要删除模板示例页或改变 section 数量，必须先记录原因，并让用户接受 `accepted-with-notes`；否则默认修复生成策略，而不是接受版式漂移。
 
-1. 用户明确事实是目标产品承诺来源。
-2. `style_template` 的批注/注释是格式和生成约束来源；必须转成 `template_guidance`。
-3. `company_prior_datasheet` 用于公司术语、写法、资产和可确认的同族产品事实；跨产品复用要标边界。
-4. `reference_datasheet` 用于章节框架、pin-to-pin 对照、竞品图形、待补项和风险发现；进入正文时必须标 `competitor_source` 或等效风险。
+## 校验
 
-`source_map.json` 必须能解释正文每个关键事实、风险项、图片和版式决定从哪里来；结构化版式记录中的字体/加粗规则，以及渲染视觉观察中的页面角色、左右/上下排版、区块边界、分界线、间距和 Notes 位置，应作为 `layout_role`、`format_fact` 或 `template_guidance` 记录。
+生成前后都要校验。数据校验包括 pin 编号重复、pin name 冲突、pin-to-pin 一致性、pin type、一致的电源/地、差分对、min/typ/max、单位、测试条件、ESD/thermal/operating condition、参数来源、竞品与历史产品是否可比、寄存器地址重复、bit field 重叠、reset value、图片文件存在、Note / Notes 是否遗漏。
 
-### Step 4: 按版式合同设计并生成 datasheet DOCX
+文档校验包括模板保真失败、未替换占位符、TODO/TBD/FIXME、内部注释残留、未授权竞品图片、表格超宽、图片超出页面、孤立标题、空白页异常、目录未更新、图号/表号错误、页眉页脚错误和醒目标注清单未处理。
 
-你负责创作设计并落到 DOCX，不要把交付质量交给固定脚本决定。先用 Step 2/3 的版式合同决定页面角色、section、左右/上下排版、字体系统、表格/Notes/图文/notice 规则，再写内容、选择实现方式并生成交付稿。
+## 版式视觉验收与收敛
 
-生成前先列出输出结构草图：每个计划页面或 section 对应哪个模板版式角色、承载哪些 datasheet 内容、使用单栏还是双栏、图文是左右还是上下排版、Notes 和声明区用哪种模板写法。没有版式角色的内容先调整结构或回到 Step 2 补版式合同，不要直接落到 DOCX。
+生成 DOCX 后必须进行版式视觉验收，并输出 `visual-check.md`。视觉检查 failed 不是结束状态，而是进入下一轮修复的触发器；不得直接交付未收敛的版式问题。
 
-#### 创作规则
+视觉验收必须基于模板渲染图和生成稿渲染图对照检查，不得只抽查生成稿。模板保真检查失败、页眉页脚缺失、目录字段丢失、目录页明显错乱、封面固定信息丢失、法务页样式丢失时，直接记为 Blocker。
 
-设计每个可见元素前先过内容依据检查：
+### 验收循环
 
-1. 这个元素解释或承载了哪个目标事实、来源事实、版式规则、风险项、任务约束或 datasheet 专业必要信息？
-2. 它来自哪个 source role 和 source ref，或由哪些来源综合得出？
-3. 它为什么应该出现在这个章节和这个位置；它是否符合该章节在芯片 datasheet 中的专业用途？
-4. 它是否误把模板话术、竞品事实、既往产品事实或参考稿缺陷当成目标产品事实？
-
-任何问题答不清时，不要把该元素写进正文；先补证据、改成风险项、标为不适用，或向用户澄清。
-
-创作规则至少覆盖：
-
-- 首页：按模板视觉组织 description、features、applications、风险段落、logo/header/footer、水印和页码节奏。
-- 章节顺序：结合竞品结构、我司既往产品和模板批注决定，不硬编码固定章节。
-- 图形：真实图优先；可从用户明确指定的 PDF 裁图、从用户明确指定的 DOCX 抽图、或创建清晰的临时示意图。所有非目标确认图都必须有风险说明。
-- 表格：参考模板、目标事实、竞品参考和我司既往产品中有价值的表格密度和样式；缺失值写成明确风险，不交付空泛占位。
-- Notes：凡来源表格或模板要求表后 `Notes:`、`Note:`、角标解释、单位说明、stress/ESD/thermal 限制说明、包装/丝印说明，都要按当前表格/图/段落的实际内容重建或在 `source_map.json` 标为不适用。
-- Notes 内容判断：先看该表/图有没有角标、缩写、单位、测试条件、来源边界、风险项或模板批注要求；Notes 只解释这些具体内容。若没有可解释对象，记录“不适用”比生成空泛 Notes 更好。
-- 目录：目录条目和页码要与生成稿一致；如果 Word 自动域不可用，可先生成静态目录并在审计记录中说明。
-- 风险：统一使用醒目的风险标记，例如 `TBD - NEED NCS CONFIRMATION`、`COMPETITOR BETTER - NEED REVIEW`、`SOURCE FROM COMPETITOR - NEED NCS CONFIRMATION`。
-- 正文逐项内容：正文段落、features bullets、applications、表格行、图题、Notes、声明和 Important Notice 都要根据当前芯片内容和章节专业目的生成；不要复用“看起来像 datasheet”的通用句子来填版面。
-- 商标和法务：模板或参考稿里的商标、logo、专利、版权和复印限制文字不属于技术正文。需要保留时，把它们放在页脚、封底 notice、首页独立声明区或 `Important Notice`，并先确认品牌主体和措辞适用于目标公司。若模板在首页左栏分界线下有独立 logo/trademark 声明区，应按该区域重建。
-
-#### DOCX 实现方式
-
-选择能达到目标效果的方法，而不是默认选择脚本：
+1. 渲染模板关键页和生成稿关键页。
+2. 按页面角色执行视觉 checklist。
+3. 输出或更新 `visual-check.md`。
+4. 若结论为 `passed`，进入最终交付。
+5. 若结论为 `failed`，生成 `layout-fix-list.md`。
+6. 按严重度修复版式问题。
+7. 重新生成 DOCX。
+8. 重新渲染并复查。
+9. 重复循环，直到收敛到允许的停止条件。
 
-1. **模板改造路线**：复制 `style_template` DOCX，清理占位正文，保留页眉页脚、水印、section、样式、编号、表格样式和图片关系，再用 OOXML/python-docx/Word COM 写入新内容。
-2. **混合资产路线**：从用户明确指定的 `reference_datasheet` 或 `company_prior_datasheet` 抽取/裁剪图形，按 `source_map.json` 记录来源和风险，再插入 DOCX。
-3. **模板驱动临时脚本路线**：为当前任务写一次性临时脚本时，脚本必须以 `style_template` 副本或 Step 2/3 的版式合同为输入约束，按已匹配的版式角色写入内容；脚本只服务当前交付稿，并在汇报中列出路径。从空白 DOCX 仿造模板只能作为不可交付实验稿，不能作为最终 datasheet。
-
-#### 临时脚本编写约束
-
-写临时生成脚本前，先在脚本顶部或相邻注释中列出本轮脚本合同：输入文件、输出路径、消费的 `layout_contract`、输出结构草图、页面角色映射、禁止残留文本、必须生成的校验产物和失败退出条件。脚本只做确定性执行，不在脚本里重新发明 datasheet 内容策略；内容、版式角色和风险标注来自 Step 2/3/4 的审计记录。
+停止条件只能是 `passed`、`accepted-with-notes`、`blocked` 或 `not run`。`accepted-with-notes` 必须有用户明确确认和剩余差异说明；`blocked` 必须说明缺少渲染工具、模板损坏、字体缺失、授权资产缺失或无法稳定复现等原因；`not run` 只能用于无法执行视觉验收，且不能声称版式通过。
 
-临时脚本必须满足：
-
-- 以 `style_template` 副本为主输入，或明确读取 `layout_contract` 和输出结构草图；不能从空白 DOCX 直接生成最终稿。
-- 对每个写入的 section、表格、图形、Notes、声明区和 notice/footer 记录来源角色、版式角色和输出位置；无法匹配版式角色时失败退出。
-- 在写入前清理或替换模板占位正文、旧型号、旧日期、旧品牌/法务主体、批注载体和不适用的页眉页脚文字。
-- 写入后自动调用 `verify_datasheet.py` 的相关检查；校验失败时不要复制到执行目录下的 `datasheet/` 作为最终稿。
-- 把脚本路径、输入、输出、校验命令和失败原因写入汇报或测试记录；临时脚本不要写成 skill 的永久通用生成器。
-
-实现时必须注意：
-
-- 生成逻辑必须消费版式合同：每个 section、表格、图形、Notes、声明区和 notice/footer 都要能回指一个模板版式角色或格式规则。
-- 保留或重建模板页眉页脚和水印，不要用纯文本页眉页脚替代复杂模板。
-- 替换旧型号、旧日期、旧页脚公司信息和模板占位正文。
-- 清理模板商标/法务样板句；只在合适的 notice/footer/独立声明区位置保留确认适用的法务文字。
-- 重建表格和图形下方的 `Notes:`/`Note:`，包括角标、缩写、测试条件、绝对最大额定说明、热性能说明和包装/丝印说明；每条 Notes 必须能指向当前表格/图形中的具体字段、角标或来源边界。
-- 保留或重建两栏/单栏 section、分页、目录、表格标题行、Notes、caption 和页码。
-- 插入真实图或清楚标风险的示意图；不要让空白占位框冒充完成内容。
-- 每个竞品来源、弱于竞品项、目标事实缺失项都要在正文或风险清单中醒目标注。
-
-#### 交付收口
-
-最终 DOCX 正文只放 datasheet 内容。来源控制表、批注处置表、格式验证清单等内部审计内容保存在审计产物中，不要塞进交付正文，除非用户明确要求审计稿。
-
-生成稿收口时，在执行目录下创建 `datasheet/` 和 `Artifacts/<new-datasheet-name>/` 两个并行目录；`<new-datasheet-name>` 使用最终 datasheet 文件名去掉 `.docx` 后的 stem，例如 `<part>_Datasheet_<rev>_<status>_<date>`。最终交付稿放在执行目录的 `datasheet/` 下，审计和中间产物放在 `Artifacts/<new-datasheet-name>/` 下：
-
-```text
-datasheet/
-└── <new-datasheet-name>.docx
-
-Artifacts/<new-datasheet-name>/
-├── work/
-│   ├── analysis.json
-│   ├── source_map.json
-│   ├── layout_contract.json
-│   ├── output_structure_plan.json
-│   ├── scripts/
-│   └── assets/
-├── renders/
-│   ├── template/
-│   ├── draft/
-│   └── final/
-├── visual_compare/
-└── review/
-```
-
-只有执行目录下的 `datasheet/<new-datasheet-name>.docx` 可以称为最终交付稿。后续校验、渲染和汇报都以该路径为准；校验失败的 DOCX、中间稿、临时生成脚本、抽取资产和审计记录留在 `Artifacts/<new-datasheet-name>/work/`、`renders/`、`visual_compare/` 或 `review/` 中。
-
-### Step 5: 校验并迭代
-
-校验不是重新设计版式的第一步；它用于确认 Step 2/3 的版式合同已经约束了 Step 4 的生成结果。若生成稿没有预先记录版式合同、输出结构草图或页面角色映射，视觉校验直接判为 `failed`，退回 Step 2/4。
-
-运行结构校验：
-
-```bash
-python scripts/verify_datasheet.py --docx <draft.docx> --expect "<required text>" --risk-marker "<red marker>" --forbid-comments --forbid-body-text "<template placeholder text>"
-```
-
-按实际模板事实增加检查，例如：
-
-```bash
-python scripts/verify_datasheet.py --docx <draft.docx> \
-  --forbid-body-text "SOURCE AND RISK CONTROL" \
-  --forbid-body-text "TEMPLATE GUIDANCE DISPOSITION" \
-  --forbid-body-text "FORMAT VERIFICATION REQUIREMENTS" \
-  --forbid-header-footer-text "<old-part-number-or-placeholder>" \
-  --forbid-brand-text "<old-brand-or-template-legal-entity>" \
-  --require-layout-contract <analysis-or-source-map.json> \
-  --require-output-structure-plan <source-map.json> \
-  --expect "Notes:" \
-  --min-notes <expected-minimum-notes-count> \
-  --min-sections <expected-minimum-section-count> \
-  --min-tables <expected-minimum-table-count> \
-  --min-drawings <expected-minimum-figure-count>
-```
-
-校验时回查 Step 4 的三块要求：
-
-- **创作规则**：每类可见元素至少能回指到 `source_map.json` 或分析记录中的事实、版式规则、风险项、来源边界或任务约束；正文、features、applications、表格行、图题、Notes、声明和 Important Notice 都要符合当前芯片内容和章节专业目的。发现泛泛模板句、无来源表格行、无对象可解释的 Notes、无依据 caption 或无适用主体的声明时，退回 Step 3/4 修正。
-- **DOCX 实现方式**：确认实际交付稿保留或重建了模板页眉页脚、水印、section、样式、目录、表格标题行、Notes、caption 和页码；确认旧型号、旧日期、旧页脚公司信息、模板占位正文和不适用法务样板句已处理。
-- **交付收口**：确认最终 DOCX 正文只放 datasheet 内容，内部审计内容留在 `Artifacts/<new-datasheet-name>/work/`、`visual_compare/`、`renders/` 或 `review/` 中；确认最终 datasheet DOCX 已复制到执行目录下的 `datasheet/` 中。
-
-运行版式渲染。`style_template` 是样式基准；若本轮还没有模板渲染图，先补渲染模板，再渲染生成稿：
-
-```bash
-python scripts/render_document.py <style-template.docx> --out-dir <template-render-dir> --pages 1,2-4
-python scripts/render_document.py <draft.docx> --out-dir <draft-render-dir> --pages 1,2-4
-```
-
-生成输出物和模板的 side-by-side 对比图：
-
-```bash
-python scripts/compare_renders.py \
-  --template-render-dir <template-render-dir> \
-  --draft-render-dir <draft-render-dir> \
-  --out-dir <visual-compare-dir>
-```
-
-当页码因目标内容变化而错位时，按页面角色生成对比，例如：
-
-```bash
-python scripts/compare_renders.py \
-  --template-render-dir <template-render-dir> \
-  --draft-render-dir <draft-render-dir> \
-  --out-dir <visual-compare-dir> \
-  --pair contents=2:3 \
-  --pair order_information=3:4
-```
-
-以渲染图对比作为样式验收主证据，但验收重点是输出版式是否匹配模板版式合同，不是相同页码上的文字内容。先用 Step 2 的版式合同给输出页标注版式角色，再检查同类页面是否沿用 `style_template` 的视觉系统：
-
-- 页面角色匹配：目录页对目录页、左右分栏页对左右分栏页、上下堆叠页对上下堆叠页、表格页对表格页、图形页对图形页、notice/footer 页对 notice/footer 页；不要因目标内容造成的页码错位而误判。
-- 页面结构：页面尺寸、页边距、栏数、section 切换、水印、页眉页脚、页码、页面区域划分，以及左右/上下区块关系。
-- 边界和分界线：标题区/正文区、左右栏、表格区、图形区、声明区、notice/footer 区之间的分界线、横线、留白边界和视觉间距是否匹配模板。
-- 文字排版：标题层级、段前段后、列表缩进、目录块位置和 Notes 前缀位置是否形成模板相同的版面节奏；字体、字号、颜色和加粗属性以结构化数据为主，渲染图用于发现实际换行、拥挤、字体替换、线条不可见、颜色/粗细失效或层级偏差。
-- 表格系统：外框/内框、表头底色、列宽、单元格边距、表题和表后说明的视觉位置。
-- 注释系统：`Notes:`/`Note:` 的前缀、大小写、黑体/斜体、缩进、行距、标点和说明句写法是否符合模板，并且是否解释当前表格/图形的具体内容。
-- 图文系统：图形尺寸、对齐、图题位置、编号样式、图文间距，以及图文采用左右排版还是上下排版。
-- 声明/风险系统：声明区、notice、风险标记和页脚法务信息的视觉位置与权重。
-- 版面质量：文本溢出、重叠、裁切、孤行、空白占位框和明显分页异常。
-
-允许因目标内容长度、章节增删或用户确认的版式调整产生页码和内容顺序差异；这些差异要在汇报中说明。发现同类页面的布局关系、排版方向、区块边界、分界线、间距或注释位置不一致，且没有模板证据或用户确认理由时，退回 Step 2/4 修正版式合同或生成结构，并重新渲染对比。生成 DOCX 后，如果没有输出稿渲染图，或没有输出稿与模板的 side-by-side 对比图，整体结论不能是 `passed`。
-
-### Step 6: 汇报产物和风险
-
-汇报必须包含：
-
-- 输入文档角色判断及证据。
-- 若已生成 DOCX，列出执行目录 `datasheet/` 下的最终 DOCX，以及 `Artifacts/<new-datasheet-name>/work/` 下的 `source_map.json`、`analysis.json`、`layout_contract.json`、`output_structure_plan.json`，`renders/` 下的渲染图，`visual_compare/` 下的 side-by-side 对比图，资产 manifest 或临时生成脚本路径。
-- 已确认事实、竞品来源事实、弱于竞品项、缺失项、占位项和待用户确认项。
-- 结构校验、视觉校验、CLI/平台实测的结论：`passed`、`failed` 或 `not run`；`not run` 必须说明原因。
-- 仍然无法确认的产品事实和需要 NCS/产品/封装负责人确认的项目。
-
-## When to Stop and Ask for Help
-
-立即停止并澄清：
-
-- 无法判断输入文档角色，或缺少可用格式来源。
-- pin-to-pin 兼容目标不明确。
-- 用户只提供竞品、模板和可选我司既往产品，但目标产品未明确。
-- 用户不允许风险标注，但目标事实缺失或来自竞品。
-- 模板批注、Notes、目录规则、页眉页脚或关键版式事实无法判断。
-- 来源数据冲突，且无法确定优先级。
-- 渲染或校验失败，且无法判断生成文档是否符合模板、用户意图和来源证据。
-
-不要猜测未确认的产品参数、封装兼容性、缺失功能或来源归属。
-
-## When to Revisit Earlier Steps
-
-返回 Step 1：
-
-- 用户更换任一输入角色。
-- 用户调整目标芯片、封装、兼容对象、输出语言或标注策略。
-
-返回 Step 2：
-
-- 模板版本变化。
-- 渲染图和 OOXML 解析结果不一致。
-- 目录、列表、批注、表格或图片规则仍不确定。
-- 输出结构草图无法匹配模板页面角色、左右/上下排版、字体/黑体规则或 Notes 写法。
-
-返回 Step 3/4：
-
-- 发现封装或 pinout 不兼容。
-- 发现参考来源、弱于参考项或图片来源不满足风险标注要求。
-- 模板、产品事实、竞品参考、我司既往产品或用户意图互相冲突。
-
-## Remember
-
-- 按角色处理输入，不按文件名猜。
-- 目标对象必须来自用户明确要求；竞品和可选既往产品只作为来源证据。
-- 脚本是辅助工具，不是交付质量的上限。
-- 版式合同先于生成；最终 datasheet 的版式必须按模板页面角色、section、左右/上下排版、字体系统和 Notes 写法生成。
-- 最终 datasheet 由你基于证据自主设计；必要时写模板驱动的临时脚本，但脚本必须消费版式合同或直接操作模板副本。
-- 临时脚本必须有脚本合同、页面角色映射和失败退出条件；校验失败的脚本产物不能作为最终 datasheet。
-- 所有智能体创作内容都要根据当前芯片内容、来源证据和 datasheet 专业目的生成；不能为了填版面、凑格式或模仿模板而写无具体依据的文字。
-- 新 datasheet 严格参照确认过的格式来源和事实来源，但不得保留模板占位正文或 Word 批注载体，也不得继承来源文档中的明显错误。
-- 不把模板的商标、版权、专利、保密或复印限制样板句当作 description 正文；先判断它是页脚、notice、批注规则还是应删除的模板残留。
-- 模板首页分界线下的 logo/trademark 声明区是独立声明区，不是 description 正文；需要保留时按模板位置和样式重建。
-- 表格后的 `Notes:` 是 datasheet 内容的一部分；除非明确不适用，否则生成稿和校验清单都要覆盖，并且 Notes 必须根据该表格/图形的实际内容生成。
-- 模板批注/注释必须转成可执行约束并逐条处置。
-- 目标产品事实优先；竞品只能提供框架、对标和带风险的临时来源。
-- 缺失项、弱项、参考来源项、占位项和未确认项必须醒目标注。
-- 不声明没有渲染证据支撑的版式结论。
+页数不超过 20 页时必须逐页检查；超过 20 页时至少检查封面、目录、每种页面角色、每个含图页、每个长表页、每个 Package / Mechanical / Tape & Reel 页、法务页和所有上一轮出错页。`visual-check.md` 必须列出渲染页数、实际检查页码、未检查页码及原因。只检查 contact sheet 或抽样页面不能写 `passed`，最多写 `not run` 或 `accepted-with-notes`。
+
+### 页面角色覆盖
+
+- [ ] 首页 / 封面。
+- [ ] 目录页。
+- [ ] 普通正文页。
+- [ ] 双栏正文页，如模板存在。
+- [ ] 参数表页。
+- [ ] 图文混排页。
+- [ ] Package / Mechanical / Tape & Reel 页，如存在。
+- [ ] Important Notice / 法务 / 支持页。
+
+### 视觉 checklist
+
+- [ ] 页面尺寸、方向、页边距与模板一致。
+- [ ] 页眉页脚位置、内容、横线、页码样式和 section 继承关系与模板一致。
+- [ ] Logo、水印、版权、文档状态标识位置正确。
+- [ ] 标题层级、编号、字体、段前段后间距符合模板。
+- [ ] 目录保留 Word TOC 字段或用户接受的替代机制；目录样式、缩进、点线、页码位置符合模板。
+- [ ] 表格宽度未超出页面，列宽、边框、表头样式符合模板。
+- [ ] 强结构化表格没有退化成用空格或 tab 对齐的伪表格。
+- [ ] 长表格跨页仍可读，必要时重复表头。
+- [ ] 图片未变形、未越界、未遮挡文字。
+- [ ] 图片、图表或占位图保留模板容器、caption 和上下文说明，没有整页只有占位文字。
+- [ ] Figure caption / Table caption 风格和位置符合模板。
+- [ ] Note / Notes 紧贴对应表格、图片或参数块，未遗漏。
+- [ ] 没有孤立标题、异常空白页、残留空表格行、半页以上异常空洞或明显分页错误。
+- [ ] Important Notice、法务声明、支持页视觉风格保留。
+- [ ] `DS_*` 标注在草稿版醒目但不破坏正文、表格、caption 或页眉页脚；clean 版不得残留未允许标注。
+- [ ] Draft Review Notes、差异清单或待确认清单位于用户接受的位置，不能像调试附录一样破坏模板后置页。
+- [ ] release 版无未授权竞品图片或竞品截图残留。
+
+### 内容长度与排版漂移检查
+
+基于模板 DOCX 复制生成时，内容长度变化允许导致页码和页数变化，但不得破坏模板版式规则。必须检查：
+
+- [ ] 首页核心信息没有被挤出首屏或覆盖 Logo、状态标识、法务区域。
+- [ ] Description / Features / Applications 等首页或前置区块没有互相挤压、重叠或截断。
+- [ ] 长段落已拆成短段落、bullet 或 Note，而不是靠缩小字体硬塞。
+- [ ] 长 bullet list 没有导致栏间溢出、跨栏错位或异常换页。
+- [ ] 双栏正文中左右栏流动合理，没有大面积空洞或内容跳栏异常。
+- [ ] 标题与其后第一段、表格、图片保持在同页或合理位置，避免孤立标题。
+- [ ] 表格因行数增加跨页时仍可读，表头重复，Notes 不与表格主体分离。
+- [ ] 参数表列宽没有因长参数名、条件文本、单位或 Note 撑破页面。
+- [ ] 图片和 caption 没有因为前文变长而被挤压、错位或脱离上下文。
+- [ ] Note / Notes 与对应表格、图片、参数块保持邻近关系。
+- [ ] Important Notice、Package、Mechanical、Tape & Reel 等后置章节没有被前文分页破坏样式。
+- [ ] 页眉页脚没有因为 section break、分页变化或内容增减而丢失、错继承或错页。
+- [ ] 目录页码可变化，但目录样式、缩进、点线、页码对齐必须保持。
+- [ ] 图号、表号、交叉引用和目录在内容变化后已更新或标注需更新。
+- [ ] 没有异常空白页、半页大空洞、页面底部孤立一行、表格后 Note 跑到下一页顶部等明显排版问题。
+
+发现内容长度导致排版问题时，优先按以下顺序收敛：调整内容结构，调整表格结构，调整插入位置，调整分页控制，最后才考虑轻微样式调整。不得通过随意缩小字体、压缩行距或破坏模板样式来硬塞内容；如果压缩内容会改变技术含义，必须向用户确认，不能自行删减事实或风险标注。
+
+### 问题分级与记录
+
+| 级别 | 含义 | 处理 |
+| --- | --- | --- |
+| Blocker | 影响交付或误导读者 | 必须修复或用户明确接受 |
+| Major | 明显破坏模板风格、可读性或专业性 | 默认必须修复 |
+| Minor | 轻微差异，不影响阅读和专业性 | 可记录为可接受差异 |
+| Info | 观察项或后续优化 | 不阻塞交付 |
+
+`visual-check.md` 每轮追加记录：轮次编号、输入 DOCX、渲染产物路径、检查页面范围、发现问题列表、修复动作、复查结果和本轮结论。
+
+## 输出
+
+至少交付：
+
+- 新 datasheet DOCX。
+- 生成说明：说明各章节内容来源、处理方式和不确定项。
+- 差异标注清单：列出不如竞品、缺失、待确认、竞品参考、占位内容。
+- 用户待确认问题清单。
+- 模板保真检查结果。
+- 版式视觉验收结果 `visual-check.md`。
+
+可选交付 PDF。生成 PDF 前先确认转换工具可用；不能把未执行的转换或版式检查汇报为已完成。
