@@ -265,6 +265,7 @@ Draw.io 表达：
 5. **补总线文字**：每个有效总线片段消耗一个 `data` 文本，居中放置。
 6. **补注释元素**：采样箭头、setup/hold 双向箭头、阶段背景、垂直边界线。
 7. **自检**：所有跳变点 X 对齐，文本不压线，X/Z 区分清楚，箭头不穿过主要文字。
+8. **校验**：保存为 `.drawio` 后运行 `python3 drawio-chip/scripts/validate_drawio.py <file.drawio>`；验证失败先修 XML。
 
 ## 通用示例：基础波形原语合集
 
@@ -361,11 +362,12 @@ Draw.io 表达：
 ## XML 检查清单
 
 - 每个 `<mxCell>` 要么自闭合，要么有 `</mxCell>`；`sourcePoint` / `targetPoint` 必须在 `<mxGeometry>` 内。
-- 所有 `id` 唯一，建议按功能分段编号（标签 2–9，网格 10–19，波形 20+，注释 60+）。
+- 所有 `id` 唯一且稳定，建议按功能分段编号（标签 2–9，网格 10–19，波形 20+，注释 60+）。
 - `&`、`<`、`>` 必须写成 `&amp;`、`&lt;`、`&gt;`。
 - 波形边统一 `endArrow=none;rounded=0;strokeWidth=2`；箭头注释才使用 `endArrow`。
 - 总线有效区、背景块、文字必须按 z-order 排列：背景块在前，波形线在后，文字最后。
 - 图题放在最下方，不要压住 setup/hold 箭头或总线文字。
+- 交付前必须通过 `validate_drawio.py` 的结构、ID、edge 引用检查。
 
 ## 常见问题
 
