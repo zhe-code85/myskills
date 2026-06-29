@@ -9,3 +9,4 @@ Personal skills repository for collecting, refining, and evolving reusable agent
 | `super-spec` | Active | Staged Superpowers delivery plus OpenSpec change tracking — clarify, plan, implement, verify, and archive. | `super-spec/` | superpowers 5.0.7, openspec 0.0.0 |
 | `ast-ir-methodology` | Active | Tool-agnostic, language-agnostic method for learning unfamiliar AST JSON formats and building stable source-faithful IR, with language-specific references on demand. | `ast-ir-methodology/` | — |
 | `verilog-rtl-workflow` | Active | Strict RTL delivery flow from natural-language hardware requirements: structured spec, architecture, RTL, lint, testbench, and behavioral simulation. | `verilog-rtl-workflow/` | iverilog or verilator |
+| `drawio-chip` | Active | Editable Draw.io diagrams for chip architecture, RTL data/control flow, FSMs, timing waveforms, and style-matched technical diagrams. | `drawio-chip/` | Python 3 stdlib |
