@@ -1,4 +1,4 @@
 interface:
   display_name: "NCS Datasheet Gen"
   short_description: "Template-safe chip datasheet DOCX drafts"
-  default_prompt: "Use $ncs-datasheet-gen to generate a planning chip datasheet DOCX from template and competitor/history inputs. Confirm all input gates first, normalize datasheet_model, run stage-1 short-field DOCX patch with template-fidelity checks, then perform controlled block replacement and visual convergence."
+  default_prompt: "Use $ncs-datasheet-gen to generate a planning chip datasheet DOCX from template and competitor/history inputs. Ask input gates strictly one by one, update input-gate.json and append input-gate-log.json after each answer, and do not ask the user to fill all gates at once. Before gates finish, only perform identity/field-level lightweight recognition. Validate input gates before modeling, normalize datasheet_model, use formal block-ops DSL instead of temporary cleanup scripts, preserve functional TOC/field fidelity, run controlled block replacement, render and scan with render_and_check.py, and complete visual convergence."

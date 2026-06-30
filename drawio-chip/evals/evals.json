@@ -1,0 +1,116 @@
+{
+  "skill_name": "drawio-chip",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "chip-block-diagram-conversion",
+      "prompt": "Please turn the following existing design into an editable Draw.io diagram: an I2C master with input APB register block, core controller, shift register, and open-drain SCL/SDA output stage. Connections: APB register block sends config and command fields to the core controller; the core controller drives the shift register and open-drain SCL/SDA output stage; the shift register sends serial data to the output stage; the output stage returns sampled SCL/SDA status to the core controller. Show only the provided modules and their connections; do not invent new architecture.",
+      "expected_output": "A .drawio file that renders the provided modules and links, stays in chip-design style, uses independent transparent text labels rather than edge labels, numeric cell ids, and passes validation.",
+      "files": [],
+      "assertions": [
+        "Creates an editable .drawio file.",
+        "Includes the provided APB register block, core controller, shift register, and open-drain SCL/SDA output stage.",
+        "Shows the specified config/command, controller-to-shift-register, serial-data, controller-to-output-stage, and sampled-status relationships.",
+        "Does not add unprovided modules or architecture.",
+        "Uses separate transparent text labels rather than text inside edge value attributes.",
+        "Uses numeric mxCell ids for generated cells.",
+        "Passes the bundled drawio validation script or records a clear validation result."
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "timing-waveform-conversion",
+      "prompt": "Convert this WaveJSON into an editable Draw.io timing diagram. Keep the waveform semantics and bus labels intact, distinguish unknown X from high-impedance Z, and do not invent sample/setup/hold annotations because they are not present in this input. {\"title\":\"req-ack timing\",\"signal\":[{\"name\":\"clk\",\"wave\":\"p....\"},{\"name\":\"req\",\"wave\":\"0.1..\"},{\"name\":\"ack\",\"wave\":\"0..1.\"},{\"name\":\"data\",\"wave\":\"x.=z.\",\"data\":[\"D0\"]}]}",
+      "expected_output": "A .drawio timing diagram that preserves the requested waveform meaning, uses numeric cell ids, preserves X versus Z semantics, preserves D0 as the bus label, passes validation without using edge labels, and does not invent missing sample/setup/hold annotations.",
+      "files": [],
+      "assertions": [
+        "Creates an editable .drawio timing diagram.",
+        "Includes clk, req, ack, and data waveforms.",
+        "Preserves D0 as the data bus label.",
+        "Distinguishes unknown X and high-impedance Z data states.",
+        "Does not invent sample/setup/hold annotations that are absent from the input.",
+        "Uses numeric mxCell ids for generated cells.",
+        "Passes the bundled drawio validation script or records a clear validation result."
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "reference-style-migration",
+      "prompt": "Redraw this existing UART RX design as an editable Draw.io diagram using this reference visual style: monochrome chip-design-document style, white background, square module boxes, Consolas-like technical font, thin black orthogonal arrows, dashed light-gray clock-domain boundary, and separate transparent signal labels beside lines. Existing UART RX design content: rx_pad feeds input synchronizer; input synchronizer feeds 16x oversampling sampler; sampler feeds start-bit detector and bit counter; bit counter and sampler feed RX shift register; RX shift register writes RX FIFO; control FSM sequences IDLE, START, DATA, STOP, PUSH; status logic reports fifo_full, framing_error, rx_valid, and irq. Use only this provided design content; do not add extra blocks.",
+      "expected_output": "A .drawio diagram that applies the described reference style while only using the provided UART RX modules, FSM, paths, and status signals.",
+      "files": [],
+      "assertions": [
+        "Creates an editable .drawio file.",
+        "Uses the requested monochrome chip-document style with square boxes, thin orthogonal arrows, and Consolas-like technical labels.",
+        "Includes only the provided UART RX modules, FSM states, status signals, and paths.",
+        "Shows a dashed light-gray clock-domain boundary or equivalent domain grouping.",
+        "Uses separate transparent signal labels beside lines rather than labels embedded in edges.",
+        "Does not add extra UART blocks, FIFOs, timers, baud generators, or unprovided modules."
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "insufficient-design-input",
+      "prompt": "Please draw a DMA microarchitecture block diagram for me.",
+      "expected_output": "A clarifying question asking for the missing design structure instead of inventing a DMA architecture.",
+      "files": [],
+      "assertions": [
+        "Does not create a speculative DMA microarchitecture diagram.",
+        "Asks for missing module list, signal connections, interfaces, or equivalent design details.",
+        "Explains that the skill renders provided design content rather than inventing architecture."
+      ]
+    },
+    {
+      "id": 4,
+      "eval_name": "non-chip-routing",
+      "prompt": "Turn these product onboarding steps into a Draw.io flowchart with simple boxes and arrows: signup, verify email, create workspace, invite teammates, finish tutorial, and first project created. This is a business workflow, not an RTL or chip design.",
+      "expected_output": "A response that treats this as a generic Draw.io flowchart rather than a chip/RTL rendering task, or states that drawio-chip is only a fallback for this non-chip case.",
+      "files": [],
+      "assertions": [
+        "Treats the prompt as a generic business/process Draw.io flowchart rather than a chip/RTL diagram.",
+        "Does not introduce chip/RTL terminology, modules, signals, domains, or buses.",
+        "Either creates a simple generic flowchart or explicitly states drawio-chip is only a fallback for non-chip diagrams."
+      ]
+    },
+    {
+      "id": 5,
+      "eval_name": "reference-only-clarify",
+      "prompt": "I only have a reference screenshot of a chip block diagram and want the same style recreated in Draw.io, but I have not provided the new module list or signal connections yet.",
+      "expected_output": "A clarifying question that asks for the new design input instead of trying to infer content from the screenshot.",
+      "files": [],
+      "assertions": [
+        "Does not infer new chip modules or connections from the absent reference screenshot.",
+        "Asks for the missing new module list and signal connections.",
+        "Distinguishes style reference from design content."
+      ]
+    },
+    {
+      "id": 6,
+      "eval_name": "architecture-invention-guard",
+      "prompt": "Draw a CPU frontend microarchitecture in Draw.io. Existing blocks I can confirm are fetch, decode, branch prediction, rename, issue, and ROB. I have not provided queues, cache, TLB, commit, predictor internals, or exact connections. Please do not add anything that is not confirmed.",
+      "expected_output": "A response that either asks for the missing connection structure before drawing, or draws only the confirmed blocks while explicitly not adding unprovided queues, cache, TLB, commit, predictor internals, or speculative connections.",
+      "files": [],
+      "assertions": [
+        "Does not add unprovided queues, cache, TLB, commit, predictor internals, or speculative connections.",
+        "Either asks for missing connections or draws only the confirmed blocks.",
+        "Explicitly acknowledges that only fetch, decode, branch prediction, rename, issue, and ROB are confirmed."
+      ]
+    },
+    {
+      "id": 7,
+      "eval_name": "soc-top-architecture-rendering",
+      "prompt": "Turn this existing chip top architecture into an editable Draw.io diagram. Existing design: chip_top contains cpu_core, main_xbar, sram0, sram1, dma, uart0, spi_host0, gpio, plic, clkmgr, rstmgr, aon_timer, padctrl, and adc_if. The cpu_core, main_xbar, sram0, sram1, dma, uart0, spi_host0, gpio, and plic are in clk_main. clkmgr, rstmgr, and padctrl are in clk_io. aon_timer is in clk_aon and should be shown as an always-on domain. adc_if is an analog boundary block on the bottom edge. main_xbar connects cpu_core, dma, sram0, sram1, uart0, spi_host0, gpio, and plic. padctrl connects uart0, spi_host0, and gpio to external pads. Show only the provided modules, clock-domain coloring, xbar-centered topology, and pad/analog boundary; do not add IP, domains, buses, or connections beyond this prompt.",
+      "expected_output": "A .drawio SoC top architecture diagram that uses the architecture-diagram path, centers the provided main_xbar, groups or colors only the provided clock domains, places padctrl and adc_if at the chip edge, and does not add IP, domains, buses, or connections beyond the prompt.",
+      "files": [],
+      "assertions": [
+        "Creates an editable .drawio SoC architecture diagram.",
+        "Includes only the provided modules and no extra IP blocks.",
+        "Centers or visually emphasizes main_xbar as the topology hub.",
+        "Represents clk_main, clk_io, and clk_aon domains without inventing additional domains.",
+        "Places or represents padctrl and adc_if as chip-edge or boundary-facing blocks.",
+        "Shows only the provided main_xbar and padctrl connections.",
+        "Passes the bundled drawio validation script or records a clear validation result."
+      ]
+    }
+  ]
+}

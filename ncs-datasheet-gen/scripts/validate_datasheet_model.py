@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -149,9 +150,11 @@ def check_parameter(item: dict[str, Any], path: str, errors: list[str], warnings
             warnings.append(f"{path} min/typ/max order should be reviewed")
 
 
-def check_pins(pins: Any, errors: list[str], warnings: list[str]) -> None:
+def check_pins(pins: Any, metadata: dict[str, Any], errors: list[str], warnings: list[str]) -> None:
     seen_numbers: dict[str, int] = {}
     seen_names: dict[str, int] = {}
+    names: set[str] = set()
+    numeric_pins: set[int] = set()
     for index, pin in enumerate(iter_items(pins)):
         path = f"structured_sections.pins[{index}]"
         check_source(pin, path, errors)
@@ -164,12 +167,36 @@ def check_pins(pins: Any, errors: list[str], warnings: list[str]) -> None:
             if number in seen_numbers:
                 errors.append(f"{path}.pin_number duplicates structured_sections.pins[{seen_numbers[number]}]")
             seen_numbers[number] = index
+            if number.isdigit():
+                numeric_pins.add(int(number))
         if name:
             if name in seen_names and name not in {"GND", "VSS", "NC", "DNC", "RESERVED"}:
                 warnings.append(f"{path}.pin_name duplicates structured_sections.pins[{seen_names[name]}]")
             seen_names[name] = index
+            names.add(name)
     if pins and not any(str(pin.get("pin_name", "")).upper() in {"GND", "VSS"} for pin in iter_items(pins)):
         warnings.append("structured_sections.pins should include at least one ground pin or explain the exception")
+    if numeric_pins:
+        expected = set(range(1, max(numeric_pins) + 1))
+        missing = sorted(expected - numeric_pins)
+        if missing:
+            errors.append(f"structured_sections.pins is missing numeric pin(s): {missing}")
+    for name in sorted(names):
+        if name.endswith("_P") and f"{name[:-2]}_N" not in names:
+            errors.append(f"structured_sections.pins differential pair missing negative mate for {name}")
+        if name.endswith("_N") and f"{name[:-2]}_P" not in names:
+            errors.append(f"structured_sections.pins differential pair missing positive mate for {name}")
+
+    target_policy = metadata.get("target_policy")
+    if isinstance(target_policy, dict):
+        target_text = json.dumps(target_policy, ensure_ascii=False).lower()
+        match = re.search(r"(\d+)\s*-?\s*pin", target_text)
+        if match and numeric_pins and int(match.group(1)) != len(numeric_pins):
+            errors.append(
+                f"pin-to-pin target expects {match.group(1)} numeric pins, but structured_sections.pins has {len(numeric_pins)}"
+            )
+        if "pin-to-pin" in target_text and not numeric_pins:
+            errors.append("pin-to-pin target requires structured_sections.pins")
 
 
 def check_markings(markings: Any, warnings: list[str]) -> None:
@@ -204,6 +231,10 @@ def check_template_manifest(fixed_layout: Any, errors: list[str], warnings: list
         warnings.append("fixed_layout.template_manifest.headers_footers is empty; confirm template has no header/footer")
     if is_blank(manifest.get("replaceable_blocks")) and is_blank(manifest.get("anchors")):
         warnings.append("template_manifest should include replaceable_blocks or anchors before DOCX generation")
+    if "anchors" in manifest and not isinstance(manifest.get("anchors"), dict):
+        errors.append("fixed_layout.template_manifest.anchors must be a mapping produced by extract_template_manifest.py")
+    if "body" in manifest and not isinstance(manifest.get("body"), list):
+        errors.append("fixed_layout.template_manifest.body must be a list produced by extract_template_manifest.py")
 
 
 def text_contains(value: Any, tokens: set[str]) -> bool:
@@ -268,7 +299,68 @@ def check_slot_map(slot_map: Any, errors: list[str], warnings: list[str]) -> Non
         warnings.append("slot_map has only fill operations; confirm the template needs no block replacement or controlled insertion")
 
 
-def validate(model: dict[str, Any]) -> tuple[list[str], list[str]]:
+def parse_bit_range(value: Any) -> set[int]:
+    text = str(value).strip()
+    if not text:
+        return set()
+    match = re.fullmatch(r"\[?(\d+)(?::(\d+))?\]?", text)
+    if not match:
+        return set()
+    first = int(match.group(1))
+    second = int(match.group(2)) if match.group(2) else first
+    start, end = sorted((first, second))
+    return set(range(start, end + 1))
+
+
+def check_registers(registers: Any, errors: list[str], warnings: list[str]) -> None:
+    seen_addresses: dict[str, int] = {}
+    for index, register in enumerate(iter_items(registers)):
+        path = f"structured_sections.registers[{index}]"
+        check_source(register, path, errors)
+        address = str(register.get("address", "")).strip()
+        if not address:
+            errors.append(f"{path}.address is required")
+        elif address in seen_addresses:
+            errors.append(f"{path}.address duplicates structured_sections.registers[{seen_addresses[address]}]")
+        else:
+            seen_addresses[address] = index
+        if is_blank(register.get("reset_value")):
+            warnings.append(f"{path}.reset_value should be provided or marked DS_TBD")
+        used_bits: dict[int, str] = {}
+        fields = register.get("bit_fields", register.get("fields", []))
+        for field_index, field in enumerate(iter_items(fields)):
+            field_path = f"{path}.bit_fields[{field_index}]"
+            bits = parse_bit_range(field.get("bits", field.get("bit", "")))
+            if not bits:
+                errors.append(f"{field_path}.bits is required")
+            for bit in bits:
+                if bit in used_bits:
+                    errors.append(f"{field_path}.bits overlaps {used_bits[bit]} at bit {bit}")
+                used_bits[bit] = field_path
+            for required in ("name", "access", "reset_value"):
+                if is_blank(field.get(required)):
+                    warnings.append(f"{field_path}.{required} should be provided or marked DS_TBD")
+
+
+def check_assets(assets: Any, base_dir: Path, warnings: list[str]) -> None:
+    if not isinstance(assets, dict):
+        return
+    for name, value in assets.items():
+        for index, item in enumerate(iter_items(value)):
+            asset_path = item.get("path") or item.get("file")
+            if not asset_path:
+                continue
+            text = str(asset_path)
+            if re.match(r"^[a-z]+://", text, re.IGNORECASE):
+                continue
+            path = Path(text)
+            if not path.is_absolute():
+                path = base_dir / path
+            if not path.exists():
+                warnings.append(f"assets.{name}[{index}] file does not exist: {asset_path}")
+
+
+def validate(model: dict[str, Any], *, base_dir: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -289,7 +381,7 @@ def validate(model: dict[str, Any]) -> tuple[list[str], list[str]]:
         errors.append("structured_sections is required")
         structured = {}
 
-    check_pins(structured.get("pins"), errors, warnings)
+    check_pins(structured.get("pins"), metadata, errors, warnings)
 
     for section_name, section_value in structured.items():
         if section_name not in STRUCTURED_SECTIONS_REQUIRING_SOURCE:
@@ -300,6 +392,8 @@ def validate(model: dict[str, Any]) -> tuple[list[str], list[str]]:
             if section_name in PARAMETER_SECTIONS:
                 check_parameter(item, path, errors, warnings)
 
+    check_registers(structured.get("registers"), errors, warnings)
+    check_assets(model.get("assets"), base_dir, warnings)
     check_markings(model.get("markings"), warnings)
     return errors, warnings
 
@@ -312,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         model = load_model(args.model)
-        errors, warnings = validate(model)
+        errors, warnings = validate(model, base_dir=args.model.parent)
     except Exception as exc:  # noqa: BLE001 - CLI should surface parse failures cleanly.
         errors = [f"failed to load model: {exc}"]
         warnings = []

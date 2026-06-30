@@ -41,6 +41,8 @@ class DocxStructure:
     comments: int
     content_controls: int
     toc_fields: int
+    functional_toc_fields: int
+    inert_toc_markers: int
     field_chars: int
     styles: int
 
@@ -113,6 +115,40 @@ def count_package_parts(names: set[str], pattern: str) -> int:
     return sum(1 for name in names if re.fullmatch(pattern, name))
 
 
+def element_has_hidden_text(element: ET.Element) -> bool:
+    for vanish in element.findall(".//w:vanish", NS):
+        return True
+    return False
+
+
+def toc_profile(document: ET.Element) -> tuple[int, int, int]:
+    """Return (toc_instruction_runs, functional_toc_fields, inert_toc_markers)."""
+    toc_instruction_runs = 0
+    functional_toc_fields = 0
+    inert_toc_markers = 0
+
+    for field in document.findall(".//w:fldSimple", NS):
+        instr = field.attrib.get(f"{{{W_NS}}}instr", "")
+        if "TOC" in instr:
+            toc_instruction_runs += 1
+            functional_toc_fields += 1
+
+    for paragraph in document.findall(".//w:p", NS):
+        instr_text = " ".join(
+            instr.text or "" for instr in paragraph.findall(".//w:instrText", NS)
+        )
+        if "TOC" not in instr_text:
+            continue
+        toc_instruction_runs += 1
+        has_field_chars = paragraph.find(".//w:fldChar", NS) is not None
+        if has_field_chars:
+            functional_toc_fields += 1
+        else:
+            inert_toc_markers += 1
+
+    return toc_instruction_runs, functional_toc_fields, inert_toc_markers
+
+
 def summarize_docx(path: Path) -> DocxStructure:
     if not path.exists():
         raise FileNotFoundError(path)
@@ -127,10 +163,7 @@ def summarize_docx(path: Path) -> DocxStructure:
         comments_raw = read_part(package, "word/comments.xml")
         comments = parse_xml(comments_raw, "word/comments.xml") if comments_raw else ET.Element("comments")
 
-        toc_fields = 0
-        for instr_text in document.findall(".//w:instrText", NS):
-            if instr_text.text and "TOC" in instr_text.text:
-                toc_fields += 1
+        toc_fields, functional_toc_fields, inert_toc_markers = toc_profile(document)
 
         return DocxStructure(
             path=str(path),
@@ -152,6 +185,8 @@ def summarize_docx(path: Path) -> DocxStructure:
             comments=len(comments.findall(".//w:comment", NS)),
             content_controls=len(document.findall(".//w:sdt", NS)),
             toc_fields=toc_fields,
+            functional_toc_fields=functional_toc_fields,
+            inert_toc_markers=inert_toc_markers,
             field_chars=len(document.findall(".//w:fldChar", NS)),
             styles=len(styles.findall(".//w:style", NS)),
         )
@@ -204,6 +239,7 @@ def compare_structures(
     min_embedding_ratio: float,
     min_legacy_picture_ratio: float,
     accepted_reductions: dict[str, dict[str, Any]],
+    allow_nonfunctional_toc: bool,
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -229,6 +265,17 @@ def compare_structures(
 
     if template.toc_fields and output.toc_fields < template.toc_fields:
         errors.append(f"TOC field lost: template has {template.toc_fields}, output has {output.toc_fields}")
+
+    if (
+        template.functional_toc_fields
+        and output.functional_toc_fields < template.functional_toc_fields
+        and not allow_nonfunctional_toc
+    ):
+        errors.append(
+            "functional TOC field lost: "
+            f"template has {template.functional_toc_fields}, output has {output.functional_toc_fields}; "
+            f"output inert TOC markers={output.inert_toc_markers}"
+        )
 
     if template.field_chars and output.field_chars < template.field_chars:
         warnings.append(f"field codes reduced: template has {template.field_chars}, output has {output.field_chars}")
@@ -352,6 +399,7 @@ def make_payload(args: argparse.Namespace) -> dict[str, Any]:
         min_embedding_ratio=args.min_embedding_ratio,
         min_legacy_picture_ratio=args.min_legacy_picture_ratio,
         accepted_reductions=accepted_reductions,
+        allow_nonfunctional_toc=args.allow_nonfunctional_toc,
     )
     status = "failed" if errors else ("accepted-with-notes" if accepted_notes else "passed")
     return {
@@ -384,6 +432,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-chart-ratio", type=float, default=0.50, help="Minimum chart-part retention ratio.")
     parser.add_argument("--min-embedding-ratio", type=float, default=0.50, help="Minimum embedded-object retention ratio.")
     parser.add_argument("--asset-diff", type=Path, help="JSON file documenting intentional asset reductions.")
+    parser.add_argument(
+        "--require-functional-toc",
+        action="store_true",
+        help="Compatibility flag. Functional TOC checking is enforced by default when the template has a real TOC field.",
+    )
+    parser.add_argument(
+        "--allow-nonfunctional-toc",
+        action="store_true",
+        help="Allow output TOC to degrade to manual text or inert markers.",
+    )
     args = parser.parse_args(argv)
 
     try:

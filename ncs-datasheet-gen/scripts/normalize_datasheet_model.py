@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from check_docx_template_fidelity import summarize_docx
+from extract_template_manifest import build_manifest
 
 
 def load_model(path: Path) -> tuple[dict[str, Any], bool]:
@@ -50,6 +51,37 @@ def resource_inventory(template: Path) -> dict[str, int]:
     }
 
 
+def load_manifest(path: Path | None, template: Path) -> dict[str, Any]:
+    if path:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("template manifest must be a mapping")
+        return data
+    return build_manifest(template)
+
+
+def merge_non_blank(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    merged = deepcopy(base)
+    for key, value in overlay.items():
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_non_blank(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def merge_manifest(generated: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
+    merged = merge_non_blank(generated, existing)
+    for key in ("anchors", "body", "paragraphs", "tables", "sample_rows", "comments"):
+        generated_value = generated.get(key)
+        existing_value = existing.get(key)
+        if generated_value and (not existing_value or type(existing_value) is not type(generated_value)):
+            merged[key] = generated_value
+    return merged
+
+
 def fill_slot(slot: str, target: str, source: str, status: str = "confirmed input gate") -> dict[str, str]:
     return {
         "slot": slot,
@@ -86,6 +118,7 @@ def normalize(
     *,
     nested: bool,
     template: Path,
+    manifest_path: Path | None,
     company: str,
     product: str,
     release_date: str,
@@ -101,8 +134,11 @@ def normalize(
         metadata["release_date"] = release_date
 
     fixed_layout = ensure_dict(model, "fixed_layout")
-    manifest = ensure_dict(fixed_layout, "template_manifest")
-    manifest["resource_inventory"] = resource_inventory(template)
+    existing_manifest = ensure_dict(fixed_layout, "template_manifest")
+    generated_manifest = load_manifest(manifest_path, template)
+    if "resource_inventory" not in generated_manifest:
+        generated_manifest["resource_inventory"] = resource_inventory(template)
+    fixed_layout["template_manifest"] = merge_manifest(generated_manifest, existing_manifest)
 
     fixed_layout["header_footer"] = {
         "subject": company,
@@ -123,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Normalize ncs-datasheet-gen model gates.")
     parser.add_argument("--model", type=Path, required=True, help="Input datasheet_model JSON")
     parser.add_argument("--template", type=Path, required=True, help="Template DOCX used for resource_inventory")
+    parser.add_argument("--manifest", type=Path, help="Optional pre-extracted template_manifest JSON")
     parser.add_argument("--output", type=Path, required=True, help="Normalized output JSON")
     parser.add_argument("--company", required=True, help="Confirmed company/legal subject")
     parser.add_argument("--product", default="", help="Confirmed product name")
@@ -136,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             data,
             nested=nested,
             template=args.template,
+            manifest_path=args.manifest,
             company=args.company,
             product=args.product,
             release_date=args.release_date,
