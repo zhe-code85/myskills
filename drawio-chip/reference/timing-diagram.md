@@ -15,7 +15,7 @@
 
 ## WaveJSON 输入优先脚本化
 
-如果用户提供的是合法且简单的 flat WaveJSON / WaveDrom JSON，优先使用本 skill 目录下的 `scripts/wavejson_to_drawio.py` 生成初版 `.drawio`，再检查是否需要补充 setup/hold、采样箭头、阶段标注、延迟箭头或说明文字。脚本只覆盖 `signal[].name`、`signal[].wave`、可选 `signal[].data`、可选顶层 `title`，并会为 `|` 生成贯穿信号行的关键边界线；对于 grouped signals、`node`/`edge`、`period`、`phase`、`head`、`foot`、`config` 等扩展，脚本会明确报错，之后应手工渲染对应语义，不能静默丢弃。不要在已有脚本能覆盖的基础波形场景里手写全部 XML.
+时序图 / 波形图的默认流程固定为：先把设计说明、信号列表或逐拍关系归一成 flat WaveJSON / WaveDrom JSON，再调用本 skill 目录下的 `scripts/wavejson_to_drawio.py` 生成初版 `.drawio`，最后只补脚本不覆盖的 setup/hold、采样箭头、阶段标注、延迟箭头或说明文字。**不要直接从自然语言或接口说明手写整张 XML。**脚本只覆盖 `signal[].name`、`signal[].wave`、可选 `signal[].data`、可选顶层 `title`，并会为 `|` 生成贯穿信号行的关键边界线；对于 grouped signals、`node`/`edge`、`period`、`phase`、`head`、`foot`、`config` 等扩展，脚本会明确报错，之后应手工渲染对应语义，不能静默丢弃。
 
 ## WaveJSON 符号速查
 

@@ -24,6 +24,17 @@ class ValidationError(Exception):
     """Raised when a Draw.io file violates required structure."""
 
 
+class MultiValidationError(ValidationError):
+    """Raised when report-all validation collects multiple violations."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        message = f"{len(errors)} validation issue(s):\n" + "\n".join(
+            f"{index}. {error}" for index, error in enumerate(errors, start=1)
+        )
+        super().__init__(message)
+
+
 def read_input(path: str) -> str:
     if path == "-":
         return sys.stdin.read()
@@ -247,9 +258,26 @@ def segment_intersects_rect(p1: Point, p2: Point, rect: Rect, clearance: float =
     )
 
 
+def suggest_overlap_fix(p1: tuple[float, float], p2: tuple[float, float], rect: tuple[float, float, float, float]) -> str:
+    _, _, width, height = rect
+    x1, y1 = p1
+    x2, y2 = p2
+    margin = 8
+    if y1 == y2:
+        return f"move label above y={y1 - height - margin:g} or below y={y1 + margin:g}"
+    if x1 == x2:
+        return f"move label left of x={x1 - width - margin:g} or right of x={x1 + margin:g}"
+    min_x, max_x = min(x1, x2), max(x1, x2)
+    min_y, max_y = min(y1, y2), max(y1, y2)
+    return (
+        "reroute edge with explicit orthogonal waypoints or move label outside "
+        f"edge box x={min_x:g}..{max_x:g}, y={min_y:g}..{max_y:g}"
+    )
+
+
 def validate_no_text_line_overlap(
-    cells: list[ET.Element], graph_index: int, *, clearance: float = 0.0
-) -> None:
+    cells: list[ET.Element], graph_index: int, *, clearance: float = 0.0, report_all: bool = False, suggest_fixes: bool = False
+) -> list[str]:
     vertex_rects = {
         cell.get("id", ""): rect
         for cell in cells
@@ -263,6 +291,7 @@ def validate_no_text_line_overlap(
         if cell_id in vertex_rects and cell.get("vertex") == "1" and is_text_vertex(cell.get("style"))
     }
 
+    errors: list[str] = []
     for edge in cells:
         if edge.get("edge") != "1":
             continue
@@ -273,10 +302,16 @@ def validate_no_text_line_overlap(
                 if text_id in {edge.get("source"), edge.get("target")}:
                     continue
                 if segment_intersects_rect(p1, p2, rect, clearance=clearance):
-                    raise ValidationError(
+                    message = (
                         f"graph {graph_index}: text vertex {text_id!r} overlaps edge {edge_id!r}; "
                         "move the label into whitespace or reroute the edge"
                     )
+                    if suggest_fixes:
+                        message += f"; suggested fix: {suggest_overlap_fix(p1, p2, rect)}"
+                    if not report_all:
+                        raise ValidationError(message)
+                    errors.append(message)
+    return errors
 
 
 def is_numeric_id(value: str) -> bool:
@@ -291,7 +326,9 @@ def validate_graph_model(
     transparent_text_labels: bool = False,
     no_text_line_overlap: bool = False,
     allow_non_numeric_ids: bool = False,
-) -> tuple[int, int]:
+    report_all: bool = False,
+    suggest_fixes: bool = False,
+) -> tuple[int, int, list[str]]:
     root = model.find("root")
     if root is None:
         raise ValidationError(f"graph {index}: missing <root> under mxGraphModel")
@@ -392,10 +429,16 @@ def validate_graph_model(
             if geom is None or geom.get("as") != "geometry":
                 raise ValidationError(f"graph {index}: edge {cell_id!r} missing mxGeometry as='geometry'")
 
+    overlap_errors: list[str] = []
     if no_text_line_overlap:
-        validate_no_text_line_overlap(cells, index)
+        overlap_errors = validate_no_text_line_overlap(
+            cells,
+            index,
+            report_all=report_all,
+            suggest_fixes=suggest_fixes,
+        )
 
-    return vertices, edges
+    return vertices, edges, overlap_errors
 
 
 def validate_drawio(
@@ -405,22 +448,30 @@ def validate_drawio(
     transparent_text_labels: bool = False,
     no_text_line_overlap: bool = False,
     allow_non_numeric_ids: bool = False,
+    report_all: bool = False,
+    suggest_fixes: bool = False,
 ) -> tuple[int, int, int]:
     root = parse_xml(text)
     models = get_graph_models(root)
     total_vertices = 0
     total_edges = 0
+    all_errors: list[str] = []
     for index, model in enumerate(models, start=1):
-        vertices, edges = validate_graph_model(
+        vertices, edges, errors = validate_graph_model(
             model,
             index,
             no_edge_labels=no_edge_labels,
             transparent_text_labels=transparent_text_labels,
             no_text_line_overlap=no_text_line_overlap,
             allow_non_numeric_ids=allow_non_numeric_ids,
+            report_all=report_all,
+            suggest_fixes=suggest_fixes,
         )
         total_vertices += vertices
         total_edges += edges
+        all_errors.extend(errors)
+    if all_errors:
+        raise MultiValidationError(all_errors)
     return len(models), total_vertices, total_edges
 
 
@@ -446,6 +497,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="allow non-numeric mxCell id/source/target/parent values; disabled by default because Draw.io clients can fail on string cell ids",
     )
+    parser.add_argument(
+        "--report-all",
+        action="store_true",
+        help="collect and report all text/line overlap issues instead of stopping at the first one",
+    )
+    parser.add_argument(
+        "--suggest-fixes",
+        action="store_true",
+        help="include simple label-move or edge-reroute suggestions for text/line overlap issues",
+    )
     parser.add_argument("path", help=".drawio file path, or '-' to read XML from stdin")
     args = parser.parse_args(argv)
 
@@ -457,6 +518,8 @@ def main(argv: list[str] | None = None) -> int:
             transparent_text_labels=args.transparent_text_labels,
             no_text_line_overlap=args.no_text_line_overlap,
             allow_non_numeric_ids=args.allow_non_numeric_cell_ids,
+            report_all=args.report_all,
+            suggest_fixes=args.suggest_fixes,
         )
     except (OSError, ValidationError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

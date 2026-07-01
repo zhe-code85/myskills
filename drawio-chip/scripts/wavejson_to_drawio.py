@@ -48,7 +48,12 @@ STYLE_BOUNDARY = (
     "endArrow=none;html=1;dashed=1;strokeColor=#999999;"
     "strokeWidth=2;rounded=0;"
 )
-STYLE_X = "endArrow=none;html=1;strokeColor=#888888;strokeWidth=1;rounded=0;"
+STYLE_X = (
+    "endArrow=none;html=1;strokeColor=#888888;strokeWidth=1;rounded=0;"
+)
+STYLE_X_BUS = (
+    "endArrow=none;html=1;strokeColor=#A6A6A6;strokeWidth=2;rounded=0;"
+)
 STYLE_Z = "endArrow=none;html=1;strokeColor=#777777;strokeWidth=2;rounded=0;"
 STYLE_BUS_LABEL = (
     "text;html=1;align=center;verticalAlign=middle;fontSize=12;"
@@ -173,7 +178,13 @@ def render_clock(
             ]
         )
         beat += 1
-    return [cell_edge_points(f"{cell_prefix}_wave", points, STYLE_WAVE)]
+    return [
+        cell_edge_points(
+            f"{cell_prefix}_wave",
+            points,
+            STYLE_WAVE,
+        )
+    ]
 
 
 def render_level(cell_prefix: str, row_index: int, wave: str) -> list[str]:
@@ -192,7 +203,13 @@ def render_level(cell_prefix: str, row_index: int, wave: str) -> list[str]:
             points.append((x0, points[-1][1]))
             points.append((x0, y))
         points.append((x1, y))
-    return [cell_edge_points(f"{cell_prefix}_wave", points, STYLE_WAVE)]
+    return [
+        cell_edge_points(
+            f"{cell_prefix}_wave",
+            points,
+            STYLE_WAVE,
+        )
+    ]
 
 
 def run_segments(wave: str, symbols: Iterable[str]) -> list[tuple[int, int, str]]:
@@ -277,18 +294,46 @@ def render_bus(
         x1 = X0 + end * CW
         cells.append(
             cell_edge_points(
-                f"{cell_prefix}_x_a_{seg_index}",
-                [(x0, high), (x1, low)],
-                STYLE_X,
+                f"{cell_prefix}_x_top_{seg_index}",
+                [(x0, high), (x1, high)],
+                STYLE_X_BUS,
             )
         )
         cells.append(
             cell_edge_points(
-                f"{cell_prefix}_x_b_{seg_index}",
-                [(x0, low), (x1, high)],
-                STYLE_X,
+                f"{cell_prefix}_x_bottom_{seg_index}",
+                [(x0, low), (x1, low)],
+                STYLE_X_BUS,
             )
         )
+
+        states = normalized_states(wave)
+        left_is_data = start > 0 and states[start - 1] in BUS_SYMBOLS
+        right_is_data = end < len(states) and states[end] in BUS_SYMBOLS
+        x_marks = []
+        if left_is_data:
+            x_marks.append(x0)
+        if right_is_data:
+            x_marks.append(x1)
+        if not x_marks:
+            x_marks.append((x0 + x1) / 2)
+
+        half = 5
+        for mark_index, mark_x in enumerate(x_marks):
+            cells.append(
+                cell_edge_points(
+                    f"{cell_prefix}_x_a_{seg_index}_{mark_index}",
+                    [(mark_x - half, mid - half), (mark_x + half, mid + half)],
+                    STYLE_X,
+                )
+            )
+            cells.append(
+                cell_edge_points(
+                    f"{cell_prefix}_x_b_{seg_index}_{mark_index}",
+                    [(mark_x - half, mid + half), (mark_x + half, mid - half)],
+                    STYLE_X,
+                )
+            )
     for seg_index, (start, end, _) in enumerate(run_segments(wave, {"z"})):
         x0 = X0 + start * CW
         x1 = X0 + end * CW
@@ -444,10 +489,10 @@ def render_drawio(payload: dict) -> str:
         formatted = ", ".join(issues)
         raise ValueError(
             "Unsupported WaveJSON/WaveDrom feature(s): "
-            f"{formatted}. This converter supports only flat signal rows with "
-            "name/wave/data plus an optional top-level title. Handle grouped "
-            "signals, node/edge annotations, period, and phase manually so "
-            "timing semantics are not silently lost."
+            f"{formatted}. This converter supports only flat signal rows "
+            "with name/wave/data plus an optional top-level title. Handle "
+            "grouped signals, node/edge annotations, period, and phase "
+            "manually so timing semantics are not silently lost."
         )
 
     signals = list(payload.get("signal", []))
@@ -480,17 +525,24 @@ def render_drawio(payload: dict) -> str:
         )
     )
     cells_xml = chr(10).join(cells)
-    model_xml = f'''<mxGraphModel dx="1000" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="{page_width:g}" pageHeight="{page_height:g}" math="0" shadow="0">
-      <root>
-{cells_xml}
-      </root>
-    </mxGraphModel>'''
+    model_xml = (
+        f'<mxGraphModel dx="1000" dy="700" grid="0" gridSize="10" '
+        f'guides="1" tooltips="1" connect="1" arrows="1" fold="1" '
+        f'page="1" pageScale="1" pageWidth="{page_width:g}" '
+        f'pageHeight="{page_height:g}" math="0" shadow="0">\n'
+        f'      <root>\n{cells_xml}\n      </root>\n'
+        f'    </mxGraphModel>'
+    )
     model_xml = normalize_mxgraph_ids(model_xml)
     payload_text = compress_model_xml(model_xml)
-    return f'''<mxfile host="app.diagrams.net" modified="2026-06-30T00:00:00.000Z" agent="Claude Code" version="24.7.17" type="device">
-  <diagram name="{esc(title)}" id="timing-diagram">{payload_text}</diagram>
-</mxfile>
-'''
+    return (
+        '<mxfile host="app.diagrams.net" '
+        'modified="2026-06-30T00:00:00.000Z" '
+        'agent="Claude Code" version="24.7.17" type="device">\n'
+        f'  <diagram name="{esc(title)}" id="timing-diagram">'
+        f'{payload_text}</diagram>\n'
+        '</mxfile>\n'
+    )
 
 
 def main() -> int:

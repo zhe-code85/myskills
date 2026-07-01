@@ -52,6 +52,49 @@
 - **边界完整**：domain、stage、pad/interface boundary 必须完整包住所属模块；模块不得压到不属于自己的边界内。
 - **画布优先**：当现有画布无法保持间距时，扩大画布、减少低价值标签或合并关系线；不要通过压缩模块、贴线标注或增加绕线来塞满画面。
 
+#### 参考布局（仅示意）
+
+以下 text block diagram 只用于表达模块级方案设计图的常见排版方式，不是固定架构模板。
+
+必须注意：
+- 这只是布局参考，不代表推荐设计。
+- 生成 draw.io 时，必须以用户输入的真实模块、接口、数据流、控制流和状态信息为准。
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ <module / wrapper boundary>                                                  │
+│                                                                              │
+│   <external input / analog / power / upstream>                               │
+│          │                                                                   │
+│          ▼                                                                   │
+│   ┌────────────┐      ┌──────────────────────────────────────┐      ┌──────┐ │
+│   │ <input /   │─────►│ <main datapath / processing pipeline> │─────►│<out> │ │
+│   │ adapter>   │      │  [stage] → [stage] → [stage] → [chk]  │      │port │ │
+│   └────────────┘      └──────────────────────────────────────┘      └──────┘ │
+│          ▲                          ▲                         │              │
+│          │                          │                         ▼              │
+│   ┌────────────┐          ┌ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┐     ┌────────────┐       │
+│   │ <external  │          ┆ <control / state group> ┆     │ <status /  │       │
+│   │ dependency>│─────────►┆ [top ctrl]             ┆◄───►│ monitor>   │       │
+│   └────────────┘          ┆ [state] [state] [fsm]  ┆     └────────────┘       │
+│                           └ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┄ ┘                          │
+│                                      ▲                                        │
+│                                      │                                        │
+│                           ┌────────────────────┐                             │
+│                           │ <regfile / config> │◄────► <host / MPI / APB>     │
+│                           └────────────────────┘                             │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Legend:
+  solid box     = functional block
+  dashed box    = logical group / state-control group / special subdomain
+  left → right  = main data flow
+  vertical line = config, control, status, dependency, or sideband path
+  outside block = external dependency, host interface, analog/power source, or port
+
+```
+
 #### 数据/控制平行主干规则
 
 - 只参与数据搬运、变换、缓存或输出的模块，贴近数据主干排列。
