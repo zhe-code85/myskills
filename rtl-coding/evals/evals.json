@@ -1,0 +1,51 @@
+{
+  "skill_name": "rtl-coding",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "e2e-sync-fifo",
+      "prompt": "我要实现一个同步 FIFO 模块 sync_fifo。模块设计输入已经冻结在 evals/fixtures/sync_fifo_design_input.md，接口、时序、异常和验证关注点都已确定。请据此完成 RTL 编码。为了让流程能一次跑完，我预先批准你在输入准备度通过后生成的 module_plan.md：plan 生成后视为已获我批准，直接进入编码，不必再等我确认。请把所有交付物放到 sync_fifo/ 目录下。",
+      "expected_output": "在 sync_fifo/ 下产出 module_plan.md、sync_fifo.v(或.sv)、verification_input.md、review_report.md。RTL 守住编码门禁：输出端口寄存器化、每个 output 有对应 reg 和独立时序块、两段式、ANSI 端口、单目标组合块、满写/空读被忽略、异步复位只赋常量。",
+      "files": ["evals/fixtures/sync_fifo_design_input.md"],
+      "expectations": [
+        "产出了 sync_fifo/module_plan.md，且内容规划了控制路径与数据路径(不是空模板)",
+        "产出了 sync_fifo 的 RTL 文件(.v 或 .sv)",
+        "产出了 sync_fifo/verification_input.md，覆盖主路径、边界、异常、复位恢复",
+        "产出了 sync_fifo/review_report.md，记录 coding standards 与 checklist 的 review 结论",
+        "所有 output 端口(rd_data/full/empty/count)都是寄存器时序输出，没有用 wire 直接组合输出",
+        "RTL 采用两段式：组合求值块与时序更新块分离",
+        "模块端口使用 ANSI 风格声明",
+        "异步复位分支只赋常量",
+        "满时写请求被忽略(wr_en && full 时不改写指针/count)，空时读请求被忽略",
+        "verification_input.md 与 review_report.md 引用的信号名都能在 RTL 中定位到"
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "block-vague-input",
+      "prompt": "帮我写个 FIFO 的 Verilog RTL 吧，就是那种能缓存数据的，先进先出。你看着实现就行，尽快给我代码。",
+      "expected_output": "识别到输入准备度不通过(缺接口/位宽/时钟复位/深度/满空语义/异常)，停止编码，不产出 RTL，按逐项确认方式提出一个最高优先级的阻塞问题(接口形态与端口优先)，包含 7 个反馈字段或用 AskUserQuestion。",
+      "files": [],
+      "expectations": [
+        "没有产出任何 .v / .sv RTL 文件",
+        "没有产出 module_plan.md",
+        "明确指出输入准备度不通过或设计输入不足以开始编码",
+        "向用户提出澄清问题，而不是自行假设一套接口就开写",
+        "提出的阻塞项聚焦最高优先级(接口形态与端口)，而不是一次性抛出全部问题清单"
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "conflict-wire-output",
+      "prompt": "实现 sync_fifo 模块，设计输入已冻结在 evals/fixtures/sync_fifo_design_input.md。有一个要求：读数据端口 rd_data 我不想要寄存器输出，直接用 assign 组合逻辑把存储内容接到 rd_data 上就行，这样读延迟低。其他按设计输入来。plan 生成后视为已批准，直接编码。",
+      "expected_output": "识别到用户要求(rd_data 用 wire 直接组合输出)违反强制编码规则(输出端口必须寄存器时序输出)，命中 Red Flag，停止并向用户澄清冲突，不以'用户指令优先'为由放行违规交付。",
+      "files": ["evals/fixtures/sync_fifo_design_input.md"],
+      "expectations": [
+        "识别到 rd_data 组合直出与'输出端口必须寄存器时序输出'的强制规则冲突",
+        "没有交付把 rd_data 用 assign/wire 直接组合输出的 RTL",
+        "向用户说明冲突并请求澄清，而不是默默按用户要求写违规 RTL",
+        "没有用'用户指令优先'作为放行违反强制编码规则的理由"
+      ]
+    }
+  ]
+}
