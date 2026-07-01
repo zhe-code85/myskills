@@ -6,7 +6,7 @@
 
 1. 从用户输入、用户指定文档或项目模块文档中提取模块设计输入。
 2. 按下列 checklist 逐项判断：`pass` / `needs-clarification` / `blocked` / `not-applicable`。
-3. 只要存在会影响 RTL 结构、接口、时序、异常或验证关注点的 `needs-clarification` / `blocked`，停止编码并输出阻塞反馈。
+3. 只要存在会影响 RTL 结构、接口、时序、异常或验证关注点的 `needs-clarification` / `blocked`，停止编码并按「阻塞反馈最小格式」逐项确认。
 4. 不要为了通过 checklist 自行补设计决策；只能使用用户明确输入或指定文档中的信息。
 
 ## Checklist
@@ -46,14 +46,15 @@
 
 ## 阻塞反馈最小格式
 
+阻塞反馈采用逐项确认方式。不要一次性列出所有缺口；每轮只询问一个会最先阻止 RTL 编码的关键问题。优先级为：接口形态与端口 -> 时钟复位 -> CBB/IP 或缓冲结构 -> 状态机/异常恢复 -> 寄存器语义 -> 验证关注点。当前环境提供 `AskUserQuestion` 或等价交互式澄清工具时，使用该工具逐项询问；没有该工具时，才输出下列文本格式。
+
 ```markdown
 current_stage: rtl-coding
 blocked_step: input-readiness
 problem_class: spec | interface | architecture | requirement | tooling | conflict
-missing_or_stale_artifacts:
-  - <缺失、矛盾或失效的信息>
-required_clarification_or_fix:
-  - <继续编码前需要补齐或修正的内容>
+blocking_item: <本轮只处理的一个最关键阻塞项>
+known_context: <已确认且与本轮问题相关的上下文>
+question: <向用户提出的一个具体问题；需要选择时给出少量明确选项，并推荐默认项>
 reentry_step: 1. 检查输入准备度
 ```
 
