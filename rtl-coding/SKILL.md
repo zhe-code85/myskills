@@ -25,14 +25,12 @@ description: "在已有稳定模块设计输入，或用户给出可直接编码
 
 ## Common Mistakes
 
+以下是易被无意忽略的判断性错误；触发硬停止的违规条件见「Red Flags — STOP」，此处不重复。
+
 - 跳过 `references/coding_readiness_checklist.md` 的输入准备度检查，把不稳定输入当成可编码输入。
-- 跳过 `module_plan.md`，或 plan 未获人工批准就直接写 RTL。
-- 在 `module_plan.md` 里就地补接口/边界/对外行为等 what 决策，而不是回退准备度检查。
-- 用编码阶段补齐规格、接口、复位、异常或微架构决策。
 - 输入准备度阶段未确认 CBB/IP 复用、自实现或 wrapper/参数适配决定，编码时临时选择实现方案。
+- 用编码阶段补齐规格、接口、复位、异常或微架构决策，而不是回退准备度检查。
 - 只交 RTL，不交 `<module_name>/verification_input.md`，或交付前未用 `module_plan.md`、输入准备度提炼的 `<module_name>_checklist` 与 `coding_standards.md` 共同 review。
-- 把未执行的 lint、仿真或自检写成已通过。
-- 在 plan、verification_input 或最终回复中引用当前 RTL 不存在的信号、逻辑块或路径。
 - 将一个 `always @(*)` 聚合块同时驱动多个输出或多个 `*_comb`，却把单目标组合块规则标为 `pass`。
 - 把行为仿真或 smoke/sanity 通过当成本技能必须完成的 gate；本技能的 gate 是静态一致性、编码规则和交接物一致性。
 
