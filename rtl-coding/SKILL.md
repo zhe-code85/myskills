@@ -7,13 +7,13 @@ description: "在已有稳定模块设计输入，或用户给出可直接编码
 
 ## Overview
 
-本技能把稳定模块设计输入落成可综合、可追溯的 RTL。编码前先产出 `module_plan.md`（本模块 RTL 的编码 plan），经人工评审批准后再写 RTL。完成标准是 RTL 与 `verification_input` 同步落盘，并在交付前用 `module_plan.md`、输入准备度提炼的 `<module_name>_checklist` 与 `coding_standards.md` 共同完成 review。
+本技能把稳定模块设计输入落成可综合、可追溯的 RTL。编码前先产出 `module_plan.md`（本模块 RTL 的 Design Plan），经人工评审批准后再写 RTL。完成标准是 RTL 与 `verification_input` 同步落盘，并在交付前用 `module_plan.md`、输入准备度提炼的 `<module_name>_checklist` 与 `coding_standards.md` 共同完成 review。
 
-`module_plan.md` 是本技能的产出物，不是上游输入：它在准备度通过后生成，只规划实现层 how（模块内部结构、控制路径、数据路径），不定义接口/边界/对外行为等 what。碰到未闭合的 what，回退准备度检查，不在 plan 里补设计决策。
+`module_plan.md` 是本技能的产出物，不是上游输入。Design Plan 做两件事：把准备度已确认的 what（接口、时钟复位、寄存器语义等）固化成一份自包含的编码基线快照，再在其上规划实现 how（模块内部结构、控制路径、数据路径）。固化的 what 只搬运准备度已确认的结论并标注来源，Design Plan 不新增、不修改 what；碰到未闭合的 what，回退准备度检查，不在 Design Plan 里补设计决策。
 
 本技能自包含所有编码入口判据、编码规范入口、反馈格式和目录约定。不要依赖其他 skill 的正文或 reference；需要读取的 reference 都在当前技能的 `references/` 下。
 
-阶段边界：本技能负责模块级 RTL 实现、输入准备度检查、编码 plan、编码完成前 review 和验证交接物；不负责重新定义需求、子系统边界、跨模块协作、架构分块或未闭合的微架构决策。若输入不稳定，按逐项确认方式询问用户，而不是边猜边写。
+阶段边界：本技能负责模块级 RTL 实现、输入准备度检查、Design Plan、编码完成前 review 和验证交接物；不负责重新定义需求、子系统边界、跨模块协作、架构分块或未闭合的微架构决策。若输入不稳定，按逐项确认方式询问用户，而不是边猜边写。
 
 ## Quick Reference
 
@@ -62,7 +62,7 @@ description: "在已有稳定模块设计输入，或用户给出可直接编码
 按需读取当前技能内 reference：
 
 - `references/coding_readiness_checklist.md`：编码前输入准备度检查表；不齐全时停止，不进入编码。
-- `references/module_plan_template.md`：编码 plan 模板；准备度通过后据此产出 `module_plan.md`，含宏观实现结构、控制路径、数据路径和关键决策依据。
+- `references/module_plan_template.md`：Design Plan 模板；准备度通过后据此产出 `module_plan.md`，含固化的编码基线（接口、时钟复位、寄存器语义等已确认 what）、宏观实现结构、控制路径、数据路径、关键决策依据和给验证的敏感点。
 - `references/coding_standards.md`：默认 RTL 编码规范、强制规则，并与 `module_plan.md`、输入准备度提炼的 `<module_name>_checklist` 共同作为编码完成前 review 依据；`<module_name>_checklist` 不单独落文件。
 
 ## 执行流程
@@ -83,13 +83,14 @@ description: "在已有稳定模块设计输入，或用户给出可直接编码
 - 读取 `references/coding_standards.md`。
 - 项目已有明确 coding style 时优先遵循项目规范；若与默认规则不同，在最终回复的 review 结论中说明依据和偏离范围。
 
-### 3. 生成模块 plan 并送评审
+### 3. 生成 Design Plan 并送评审
 
-先想清楚本模块 RTL 怎么实现，落成 plan 供人评审，通过后才动手写 RTL；不要跳过 plan 直接编码。
+先想清楚本模块 RTL 怎么实现，落成 Design Plan 供人评审，通过后才动手写 RTL；不要跳过 Design Plan 直接编码。
 
 - 读取 `references/module_plan_template.md`，据此产出 `<module_name>/module_plan.md`。
-- plan 内容自宏观到细节：宏观实现结构（模块内部功能块、控制路径与数据路径划分、块间信号、主数据流/控制流）-> 控制路径怎么做（FSM、握手、仲裁、使能、状态转移、异常控制）-> 数据路径怎么做（数据选择、运算、pipeline 分级、buffer、输出绑定）-> 关键决策与依据。
-- plan 只规划实现层 how；每条实现决策都要能回指某条已确认的模块设计输入或编码约束。
+- Design Plan 先固化编码基线：把准备度已确认的接口、时钟复位、寄存器语义等 what 搬进 Design Plan 并标注来源，作为自包含的编码基线；只搬运已确认结论，不新增、不修改 what。
+- 再在基线上规划实现 how，自宏观到细节：宏观实现结构（模块内部功能块、控制路径与数据路径划分、块间信号、主数据流/控制流）-> 控制路径怎么做（FSM、握手、仲裁、使能、状态转移、异常控制）-> 数据路径怎么做（数据选择、运算、pipeline 分级、buffer、输出绑定）-> 关键决策与依据。
+- plan 的实现层只规划 how；每条实现决策都要能回指某条已确认的模块设计输入或编码约束。
 - 若发现需要一个未闭合的 what 决策（接口、边界、对外行为、时序契约），这是准备度漏判的信号：停止写 plan，回退步骤 1 重新做准备度检查，不在 plan 里就地补 what。
 - plan 落盘后，送人工评审：环境提供 `AskUserQuestion` 或等价交互式工具时，用它向用户说明 plan 已生成于 `module_plan.md` 并请求批准，给出「批准进入编码 / 需修改（附意见）」选项；没有交互工具时，输出文本提示并停止，等用户下一轮指令。
 - 未获批准不得进入步骤 4。用户要求修改时，按意见更新 plan 后重新送评审。
@@ -134,7 +135,7 @@ description: "在已有稳定模块设计输入，或用户给出可直接编码
 
 ## 输出
 
-- 编码 plan：`<module_name>/module_plan.md`
+- Design Plan：`<module_name>/module_plan.md`
 - RTL 主输出：`<module_name>/*.v` 或 `<module_name>/*.sv`
 - 验证主交接物：`<module_name>/verification_input.md`
 - Review 报告：`<module_name>/review_report.md`
@@ -143,7 +144,7 @@ description: "在已有稳定模块设计输入，或用户给出可直接编码
 
 - 模块目录：所有交付物默认直接位于 `<module_name>/` 下；若项目已有明确目录约定，优先遵循项目约定，并在最终回复中说明。
 - 输入来源：用户输入、用户指定文档或项目已有模块设计文档；本技能不预设上游文件名，也不把自身产出当作上游输入。
-- 编码 plan：`<module_name>/module_plan.md`，准备度通过后产出、经人工评审批准的本模块 RTL 编码 plan；含宏观实现结构、控制路径、数据路径和关键决策依据，是编码依据与 review 回对基准。
+- Design Plan：`<module_name>/module_plan.md`，准备度通过后产出、经人工评审批准的本模块 RTL Design Plan；含固化的编码基线、宏观实现结构、控制路径、数据路径和关键决策依据，是编码依据与 review 回对基准。
 - RTL 输出：一个或多个 `<module_name>/*.v` / `<module_name>/*.sv`，直接位于模块目录下。
 - 验证交接物：`<module_name>/verification_input.md`，描述后续测试/验证必须覆盖的主路径、边界、异常、复位恢复和实现敏感点。
 - Review 报告：`<module_name>/review_report.md`，记录 `module_plan.md` 回对结论、`<module_name>_checklist` 与 `coding_standards.md` 的 review 结论、偏离说明、未执行检查和真实自检证据。
